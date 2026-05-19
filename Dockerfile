@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create data directories
-RUN mkdir -p /data/db /data/downloads /data/transcripts /data/models /public/feeds /public/audio /data/models/piper
+RUN mkdir -p /data/db /data/podcasts /data/feeds /data/models/piper
 
 # Expose port
 EXPOSE 8000

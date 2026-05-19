@@ -6,20 +6,24 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:css": "tailwindcss -i ./app/web/static/css/input.css -o ./app/web/static/css/output.css --minify",
-    "watch:css": "tailwindcss -i ./app/web/static/css/input.css -o ./app/web/static/css/output.css --watch"
+    "watch:css": "tailwindcss -i ./app/web/static/css/input.css -o ./app/web/static/css/output.css --watch",
+    "verify": "python scripts/verify.py",
+    "verify:docker": "python scripts/verify.py --docker",
+    "docker:build": "python scripts/publish_docker.py",
+    "docker:publish": "python scripts/publish_docker.py --push"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/akeslo/podcast-ad-remover.git"
+    "url": "git+https://github.com/jdcb4/podcast-ad-remover.git"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/akeslo/podcast-ad-remover/issues"
+    "url": "https://github.com/jdcb4/podcast-ad-remover/issues"
   },
-  "homepage": "https://github.com/akeslo/podcast-ad-remover#readme",
+  "homepage": "https://github.com/jdcb4/podcast-ad-remover#readme",
   "devDependencies": {
     "autoprefixer": "^10.4.23",
     "postcss": "^8.5.6",

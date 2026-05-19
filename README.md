@@ -1,4 +1,4 @@
-# Podcast Ad Remover (AGPAR) v1.3
+# Podcast Ad Remover (AGPAR) v1.3.0
 This is an app that downloads podcasts, uses AI to remove ads, and then creates a new feed that you can consume them from. 
 I mainly vibe-coded for my own personal use and it seems to be working pretty well so I thought I would share it. I've been using it fora bout a month and had a couple of friends also using it and we're pretty hapopy with how it's going. For the most part it just works. I'm sure there are heaps of things that aren't up to a professional standard, but for running on my own homelab it has worked great. 
 
@@ -81,6 +81,11 @@ A dedicated Unraid template is included (`podcast-ad-remover.xml`). Add the temp
 -   [Data Flow](Documentation/Data_Flow.md)
 -   [Deployment](Documentation/Deployment.md)
 -   [Environment Variables](Documentation/Environment_Variables.md)
+-   [Project Index](Documentation/PROJECT_INDEX.md)
+-   [Versioning](Documentation/VERSIONING.md)
+-   [Verification](Documentation/VERIFICATION.md)
+-   [Changelog](Documentation/CHANGELOG.md)
+-   [Roadmap](Documentation/ROADMAP.md)
 
 ## License
 

@@ -1,0 +1,50 @@
+# Project Index
+
+Podcast Ad Remover downloads podcast episodes, processes them to remove ads or promotional segments, and republishes RSS feeds that can be subscribed to from a podcast client.
+
+## Current Stack
+
+- Python 3.11, FastAPI, Jinja templates, SQLite.
+- FFmpeg for audio cutting and concatenation.
+- Whisper/faster-whisper for local transcription.
+- Gemini, OpenAI, Anthropic, and OpenRouter for LLM-based segment detection.
+- Tailwind CSS compiled with npm.
+- Docker for normal deployment.
+
+## Important Folders
+
+- `app/main.py`: application entry point and processor process startup.
+- `app/core/`: podcast, audio, AI, RSS, search, and processing logic.
+- `app/infra/`: SQLite initialization and repository access.
+- `app/web/`: web routes, templates, authentication helpers, and static files.
+- `app/api/`: subscription and audio endpoints.
+- `Documentation/`: architecture, deployment, release, and maintenance docs.
+- `scripts/`: verification and Docker release helpers.
+- `Dockerfile` and `docker-compose.yml`: container build and local compose configuration.
+
+## Common Commands
+
+```bash
+npm ci
+npm run build:css
+npm run verify
+npm run verify:docker
+npm run docker:build
+npm run docker:publish
+docker compose up -d --build
+```
+
+`npm run verify` is the normal pre-change completion check. `npm run verify:docker` adds a local Docker image build and should be used before release tagging or publishing.
+
+## Documentation Map
+
+- `Documentation/Architecture.md`: current application structure and data layout.
+- `Documentation/Deployment.md`: Docker and Docker Compose deployment.
+- `Documentation/Environment_Variables.md`: environment configuration.
+- `Documentation/VERSIONING.md`: version bump and Docker tag rules.
+- `Documentation/VERIFICATION.md`: checks to run before merging or releasing.
+- `Documentation/CHANGELOG.md`: release notes.
+- `Documentation/DECISIONS.md`: lightweight decision log.
+- `Documentation/ROADMAP.md`: improvement candidates and future direction.
+- `Documentation/NAMING.md`: naming conventions for code, statuses, docs, and Docker artifacts.
+- `AGENTS.md`: maintenance rules for coding agents.

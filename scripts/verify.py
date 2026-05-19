@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Run local verification checks for Podcast Ad Remover."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def executable(name: str) -> str:
+    if os.name == "nt":
+        resolved = shutil.which(f"{name}.cmd") or shutil.which(f"{name}.exe")
+        if resolved:
+            return resolved
+    return shutil.which(name) or name
+
+
+def run(command: list[str], label: str) -> None:
+    print(f"\n==> {label}")
+    print("$ " + " ".join(command))
+    subprocess.run(command, cwd=ROOT, check=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run project verification checks.")
+    parser.add_argument(
+        "--docker",
+        action="store_true",
+        help="Also build the Docker image locally as podcast-ad-remover:verify.",
+    )
+    args = parser.parse_args()
+
+    run([sys.executable, "-m", "compileall", "-q", "app", "scripts"], "Python syntax check")
+    run([executable("npm"), "run", "build:css"], "Tailwind CSS build")
+
+    if args.docker:
+        run(
+            [executable("docker"), "build", "-t", "podcast-ad-remover:verify", "."],
+            "Docker image build",
+        )
+
+    print("\nVerification completed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

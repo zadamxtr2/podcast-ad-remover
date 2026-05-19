@@ -1,47 +1,84 @@
 # Deployment
 
-## Docker Compose (Recommended)
+Docker is the recommended deployment path.
 
-```yaml
-## Docker Compose (Recommended)
+## Docker Run
+
+```bash
+docker run -d \
+  --name podcast-ad-remover \
+  -p 8000:8000 \
+  -v ./data:/data \
+  -e GEMINI_API_KEY=your_key_here \
+  -e BASE_URL=http://your-server-ip:8000 \
+  jdcb4/podcast-ad-remover:latest
+```
+
+For a production install, also set a unique `SESSION_SECRET_KEY`.
+
+## Docker Compose
+
+Use the published image when running a normal install:
 
 ```yaml
 services:
   app:
-    build: .
-    image: podcast-ad-remover
+    image: jdcb4/podcast-ad-remover:latest
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/data      # App data (DB, downloads, transcripts, feeds, audio)
+      - ./data:/data
     environment:
-      # Optional: Pre-configure API Key (or set in Admin UI)
       - GEMINI_API_KEY=your_key_here
-      # Optional: Config
       - BASE_URL=http://your-server-ip:8000
+      - SESSION_SECRET_KEY=replace-with-a-long-random-secret
+      - LOG_LEVEL=INFO
 ```
 
-## Manual Docker Run
+The repository `docker-compose.yml` is intended for local source builds and development.
+
+## Data Volume
+
+Mount `/data` and back it up before upgrades.
+
+Important paths:
+
+- `/data/db/podcasts.db`: SQLite database.
+- `/data/podcasts/`: podcast and episode artifacts.
+- `/data/feeds/`: generated RSS files.
+- `/data/models/`: downloaded local model files.
+- `/data/app.log`: application log.
+
+Do not delete `/data` unless you intentionally want to remove the app database and downloaded podcasts.
+
+## Building From Source
 
 ```bash
-docker build -t podcast-ad-remover .
-docker run -d \
-  -p 8000:8000 \
-  -v $(pwd)/data:/data \
-  -v $(pwd)/public:/public \
-  -e GEMINI_API_KEY=your_key_here \
-  podcast-ad-remover
+docker compose up -d --build
 ```
 
-## Data Volumes
-1. **`/data` (Internal)**:
-    - `db/`: Database file.
-    - `downloads/`: Temporary raw downloads.
-    - `transcripts/`: Intermediate JSON transcripts.
+For a local image without Compose:
 
-2. **`/public` (External)**:
-    - `feeds/`: RSS XML files.
-    - `audio/`: Cleaned MP3 files.
-    - `index.html`: Landing page.
+```bash
+docker build -t podcast-ad-remover:local .
+```
 
+## Release Publishing
+
+Before publishing:
+
+```bash
+npm run verify:docker
+```
+
+To publish the current version from `package.json`:
+
+```bash
+npm run docker:publish
+```
+
+This pushes both:
+
+- `jdcb4/podcast-ad-remover:<version>`
+- `jdcb4/podcast-ad-remover:latest`

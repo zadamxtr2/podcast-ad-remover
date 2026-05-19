@@ -3,7 +3,7 @@ version: '3.8'
 services:
   app:
     build: .
-    image: podcast-ad-remover
+    image: jdcb4/podcast-ad-remover:local
     restart: unless-stopped
     ports:
       - '8000:8000'

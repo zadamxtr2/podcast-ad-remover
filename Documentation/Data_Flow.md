@@ -13,7 +13,7 @@ For each queued episode:
 
 1.  **Download**:
     - Fetch audio from `enclosure` URL.
-    - Save to `/data/downloads/{uuid}.mp3`.
+    - Save episode artifacts under `/data/podcasts/{podcast_slug}/{episode_slug}/`.
 
 2.  **Transcribe (Whisper)**:
     - Load Whisper model (if not loaded).
@@ -26,16 +26,16 @@ For each queued episode:
 4.  **Ad Removal (FFmpeg)**:
     - Calculate "keep" segments (total duration minus ad segments).
     - Use FFmpeg to cut and concatenate "keep" segments.
-    - Save output to `/data/public/audio/{podcast_slug}/{uuid}.mp3`.
+    - Save processed audio in the episode artifact directory.
 
 5.  **Finalize**:
     - Update database with processing stats (time saved, ad count).
-    - Delete temporary download file.
-    - Regenerate the Podcast's local RSS feed XML in `/data/public/feeds/`.
+    - Clean up temporary/intermediate files according to the processor settings.
+    - Regenerate the podcast's local RSS feed XML in `/data/feeds/`.
 
 ## 3. Consumption
 1.  **User** points their Podcast Player to `http://{host}/feeds/{podcast_slug}.xml`.
 2.  **Player** requests the feed.
 3.  **System** serves the static XML file.
 4.  **Player** requests an episode.
-5.  **System** serves the static MP3 file from `/data/public/audio/...`.
+5.  **System** serves the processed audio file from the stored episode path.

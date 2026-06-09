@@ -144,7 +144,7 @@ from app.core.utils import get_app_base_url
 
 
 
-def generate_rss_links(request: Request, sub, global_settings: dict, user_obj=None):
+def generate_rss_links(request: Request, sub, global_settings: dict, user_obj=None, include_auth_token: bool = True):
     """Consolidated logic for generating RSS links with optional auth injection."""
     base_url = get_app_base_url(global_settings, request)
     
@@ -154,7 +154,7 @@ def generate_rss_links(request: Request, sub, global_settings: dict, user_obj=No
     auth_enabled_val = global_settings.get('enable_feed_auth')
     is_auth_enabled = str(auth_enabled_val).lower() in ('1', 'true', 'yes', 'on') if auth_enabled_val is not None else False
     
-    if is_auth_enabled:
+    if is_auth_enabled and include_auth_token:
         if global_settings.get('auth_enabled'):
             # Integrated Auth: Use same credentials as dashboard
             auth_user = user_obj.username if user_obj else "admin"
@@ -413,6 +413,7 @@ async def update_system_settings(
     enable_feed_auth: bool = Form(False),
     feed_auth_username: str = Form(None),
     feed_auth_password: str = Form(None),
+    public_subscribe_page_enabled: bool = Form(False),
     whitelist_mode: bool = Form(False),
     redirect_to: str = Form(None)
 ):
@@ -474,6 +475,7 @@ async def update_system_settings(
                 enable_feed_auth = ?,
                 feed_auth_username = ?,
                 feed_auth_password = COALESCE(?, feed_auth_password),
+                public_subscribe_page_enabled = ?,
                 whitelist_mode = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
@@ -482,6 +484,7 @@ async def update_system_settings(
               1 if enable_feed_auth else 0, 
               feed_auth_username if feed_auth_username else None, 
               hashed_feed_password if hashed_feed_password else None,
+              1 if public_subscribe_page_enabled else 0,
               1 if whitelist_mode else 0))
         conn.commit()
     
@@ -1259,9 +1262,73 @@ def _render_index(request: Request, error: str = None):
         }
     )
 
+def _build_public_subscribe_context(request: Request, global_settings: dict):
+    subs = sub_repo.get_all()
+    public_links = []
+    for sub in subs:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) as count
+                   FROM episodes
+                   WHERE subscription_id = ? AND status = 'completed'""",
+                (sub.id,)
+            ).fetchone()
+            latest = conn.execute(
+                """SELECT title, pub_date
+                   FROM episodes
+                   WHERE subscription_id = ? AND status = 'completed'
+                   ORDER BY pub_date DESC LIMIT 1""",
+                (sub.id,)
+            ).fetchone()
+
+        public_links.append({
+            "sub": sub,
+            "links": generate_rss_links(request, sub, global_settings, include_auth_token=False),
+            "episode_count": row["count"] if row else 0,
+            "latest_episode": dict(latest) if latest else None,
+        })
+
+    unified_links = None
+    if subs:
+        base_url = get_app_base_url(global_settings, request)
+        rss_url = f"{base_url}/feed/unified.xml"
+        unified_links = {
+            "rss": rss_url,
+            "direct": rss_url,
+            "apple": rss_url,
+            "pocket_casts": f"pktc://subscribe/{rss_url}",
+            "overcast": f"overcast://x-callback-url/add?url={rss_url}",
+            "castbox": f"castbox://subscribe?url={rss_url}",
+            "podcast_addict": f"podcastaddict://subscribe/{rss_url}",
+        }
+
+    feed_auth_enabled = str(global_settings.get("enable_feed_auth")).lower() in ("1", "true", "yes", "on")
+
+    return {
+        "request": request,
+        "csp_nonce": get_csp_nonce(request),
+        "user": get_current_user(request) if request.session.get(SESSION_USER_KEY) else None,
+        "subscriptions": public_links,
+        "unified_links": unified_links,
+        "feed_auth_enabled": feed_auth_enabled,
+        "settings": global_settings,
+    }
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return _render_index(request)
+
+@router.get("/subscribe", response_class=HTMLResponse)
+async def public_subscribe(request: Request):
+    global_settings = get_global_settings()
+    if not global_settings.get("public_subscribe_page_enabled"):
+        raise HTTPException(status_code=404, detail="Subscribe page is disabled")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="public_subscribe.html",
+        context=_build_public_subscribe_context(request, global_settings)
+    )
 
 from app.core.processor import Processor
 

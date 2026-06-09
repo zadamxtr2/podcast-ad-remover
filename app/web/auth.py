@@ -89,6 +89,8 @@ async def auth_middleware(request: Request, call_next):
     # feeds/audio: public to world (IP check skipped), but might be protected by Feed Auth elsewhere
     if path in ["/login", "/request-access", "/submit-access-request"] or \
        path.startswith("/static/") or \
+       path == "/subscribe" or \
+       path.startswith("/subscribe/") or \
        path.startswith("/feeds/") or \
        path.startswith("/feed/") or \
        path.startswith("/audio/"):

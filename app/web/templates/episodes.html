@@ -30,13 +30,13 @@
             <!-- Mobile Delete Button (Between Image and Title) -->
             <button onclick="deleteSubscription({{ subscription.id }})"
                 class="md:hidden px-6 py-3 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-2xl transition-all flex items-center justify-center gap-3 text-sm font-bold border border-red-500/20 shadow-lg -mt-4 mb-2"
-                title="Delete Show">
+                title="Delete subscription and all local files">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
                     </path>
                 </svg>
-                Delete Show
+                Delete Subscription and Files
             </button>
 
             <!-- Content -->
@@ -112,7 +112,7 @@
             <!-- Delete button (desktop only - top right) -->
             <button onclick="deleteSubscription({{ subscription.id }})"
                 class="hidden md:block absolute top-6 right-6 p-3 text-white/20 hover:text-red-400 hover:bg-red-500/10 rounded-2xl transition-all"
-                title="Delete Show">
+                title="Delete subscription and all local files">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
@@ -806,7 +806,7 @@
                                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
                                     </path>
                                 </svg>
-                                Delete File
+                                Ignore Episode and Remove Files
                             </button>
                         </div>
                     </div>
@@ -1312,7 +1312,7 @@
     });
 
     async function deleteEpisode(id) {
-        if (!confirm('Are you sure you want to permanently delete this episode and all its files?')) return;
+        if (!confirm('Ignore this episode and remove its local files? The episode record stays ignored so it is not downloaded again automatically.')) return;
         const btn = document.getElementById(`btn-delete-${id}`);
         const originalText = btn.innerHTML;
         btn.disabled = true; btn.innerHTML = 'Deleting...';
@@ -1324,7 +1324,7 @@
     }
 
     async function downloadEpisode(id) {
-        if (!confirm('Download this episode manually?')) return;
+        if (!confirm('Download this episode manually and queue it for processing?')) return;
         try {
             const resp = await fetch(`/episodes/${id}/download`, { method: 'POST' });
             if (resp.ok) { alert('Download queued!'); location.reload(); }
@@ -1363,7 +1363,7 @@
         }
         html += `<button onclick="closeActionSheet(); deleteEpisode(${episodeId})" class="w-full text-left px-4 py-3 text-sm font-semibold text-red-400 hover:bg-red-500/10 rounded-xl flex items-center gap-3">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            Delete File
+            Ignore Episode and Remove Files
         </button>`;
 
         content.innerHTML = html;
@@ -1388,7 +1388,7 @@
 
     async function processEpisode(id, skipTranscription) {
         const action = skipTranscription ? "Reprocess (Keep Transcript)" : "Full Reprocess";
-        if (!confirm(`${action}: Are you sure?`)) return;
+        if (!confirm(`${action}: this will queue the episode again using the current processing settings. Continue?`)) return;
         const url = `/api/episodes/${id}/reprocess` + (skipTranscription ? "?skip_transcription=true" : "");
         try {
             const response = await fetch(url, { method: 'POST' });
@@ -1401,7 +1401,7 @@
     }
 
     async function cancelEpisode(id) {
-        if (!confirm('Cancel processing?')) return;
+        if (!confirm('Cancel processing and ignore this episode? Local files for this episode will be removed.')) return;
         await fetch(`/api/episodes/${id}/cancel`, { method: 'POST' });
         location.reload();
     }
@@ -1415,7 +1415,7 @@
     }
 
     async function deleteSubscription(id) {
-        if (!confirm('Delete this subscription? All episodes and files will be removed.')) return;
+        if (!confirm('Delete this subscription and all local files for its episodes? This removes the subscription from the app.')) return;
         const res = await fetch(`/api/subscriptions/${id}`, { method: 'DELETE' });
         if (res.ok) window.location.href = '/';
         else alert('Failed to delete subscription');

@@ -74,6 +74,7 @@ def init_db():
         enable_feed_auth INTEGER DEFAULT 0,
         feed_auth_username TEXT,
         feed_auth_password TEXT,
+        public_subscribe_page_enabled INTEGER DEFAULT 1,
         
         auth_enabled INTEGER DEFAULT 0,
         require_password_change INTEGER DEFAULT 0,
@@ -207,6 +208,7 @@ Transcript Context: {transcript_context}""",))
         "ALTER TABLE app_settings ADD COLUMN enable_feed_auth INTEGER DEFAULT 0",
         "ALTER TABLE app_settings ADD COLUMN feed_auth_username TEXT",
         "ALTER TABLE app_settings ADD COLUMN feed_auth_password TEXT",
+        "ALTER TABLE app_settings ADD COLUMN public_subscribe_page_enabled INTEGER DEFAULT 1",
         "ALTER TABLE app_settings ADD COLUMN auth_enabled INTEGER DEFAULT 0",
         "ALTER TABLE app_settings ADD COLUMN require_password_change INTEGER DEFAULT 0",
         "ALTER TABLE app_settings ADD COLUMN initial_password TEXT",

@@ -49,7 +49,7 @@ async def create_subscription(sub: SubscriptionCreate, initial_count: int = 5):
 
 @router.delete("/subscriptions/{id}")
 async def delete_subscription(id: int):
-    """Delete a subscription and its episodes."""
+    """Delete a subscription and remove local files for its episodes."""
     sub = repo.get_by_id(id)
     
     if sub:
@@ -88,7 +88,7 @@ async def delete_subscription(id: int):
 
 @router.delete("/episodes/{id}")
 async def delete_episode(id: int):
-    """Delete a specific episode and its files."""
+    """Ignore a specific episode and remove its local files."""
     proc = get_processor()
     success = await proc.delete_episode(id)
     if not success:
@@ -122,7 +122,7 @@ async def process_episode(id: int, skip_transcription: bool = False):
 
 @router.post("/episodes/{id}/cancel")
 async def cancel_episode(id: int):
-    """Cancel processing and reset status (Soft Delete)."""
+    """Cancel processing, ignore the episode, and remove local files."""
     proc = get_processor()
     success = await proc.delete_episode(id)
     if not success:

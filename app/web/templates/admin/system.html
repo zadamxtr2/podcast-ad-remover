@@ -73,6 +73,7 @@
         <!-- Hidden fields to preserve Auth/Access settings -->
         <input type="hidden" name="auth_enabled" value="{% if settings.auth_enabled %}on{% endif %}">
         <input type="hidden" name="enable_feed_auth" value="{% if settings.enable_feed_auth %}on{% endif %}">
+        <input type="hidden" name="public_subscribe_page_enabled" value="{% if settings.public_subscribe_page_enabled %}on{% endif %}">
         <input type="hidden" name="ip_allowlist" value="{{ settings.ip_allowlist or '' }}">
         <input type="hidden" name="feed_auth_username" value="{{ settings.feed_auth_username or '' }}">
 

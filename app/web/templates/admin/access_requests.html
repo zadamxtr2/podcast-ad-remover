@@ -73,7 +73,9 @@
             <input type="hidden" name="check_interval_minutes" value="{{ settings.check_interval_minutes or 60 }}">
             <input type="hidden" name="app_external_url" value="{{ settings.app_external_url or '' }}">
             <input type="hidden" name="enable_feed_auth" value="{% if settings.enable_feed_auth %}on{% endif %}">
+            <input type="hidden" name="public_subscribe_page_enabled" value="{% if settings.public_subscribe_page_enabled %}on{% endif %}">
             <input type="hidden" name="feed_auth_username" value="{{ settings.feed_auth_username or '' }}">
+            <input type="hidden" name="whitelist_mode" value="{% if settings.whitelist_mode %}on{% endif %}">
         </div>
 
         <div class="flex justify-end pt-4 border-t border-white/[0.08] mt-6">
@@ -150,24 +152,37 @@
     </div>
 </div>
 
-<!-- Feed Protection Settings -->
+<!-- Podcast Subscription Access -->
 <div class="mb-8">
-    <h2 class="font-display text-2xl font-bold mb-6">Feed Protection</h2>
+    <h2 class="font-display text-2xl font-bold mb-6">Podcast Subscription Access</h2>
 
     <form method="post" action="/admin/system/update" onsubmit="return validateFeedAuth(this)">
         <div class="space-y-6">
             <label class="flex items-center cursor-pointer">
+                <input type="checkbox" name="public_subscribe_page_enabled" id="public_subscribe_page_enabled"
+                    {% if settings.public_subscribe_page_enabled %}checked{% endif %}
+                    class="h-4 w-4 text-primary-500 rounded bg-surface-base border-white/20 focus:ring-primary-500">
+                <span class="ml-3 font-medium">Enable public read-only subscription page</span>
+            </label>
+            <div class="bg-surface-base p-3 rounded-xl border border-white/[0.08]">
+                <p class="text-sm text-text-secondary">
+                    Public page: <a href="/subscribe" class="text-primary-400 hover:text-primary-300">/subscribe</a>.
+                    Visitors can subscribe to existing podcast feeds from this page, but cannot add, edit, reprocess, or delete anything.
+                </p>
+            </div>
+
+            <label class="flex items-center cursor-pointer">
                 <input type="checkbox" name="enable_feed_auth" id="enable_feed_auth" {% if settings.enable_feed_auth
                     %}checked{% endif %}
                     class="h-4 w-4 text-primary-500 rounded bg-surface-base border-white/20 focus:ring-primary-500">
-                <span class="ml-3 font-medium">Protect RSS Feeds with User Authentication</span>
+                <span class="ml-3 font-medium">Require authentication for RSS feeds and audio files</span>
             </label>
 
             <div id="feed_auth_container"
                 style="display: {% if settings.enable_feed_auth %}block{% else %}none{% endif %}">
                 <div id="feed_auth_integrated" class="alert-info mb-4"
                     style="display: {% if settings.auth_enabled %}flex{% else %}none{% endif %}">
-                    <strong>User authentication is enabled.</strong> Podcast apps will require the same Username and
+                    <strong>User authentication is enabled.</strong> Podcast apps will require the same username and
                     Password that you use to log in.
                 </div>
 
@@ -205,8 +220,10 @@
             </div>
             {% endif %}
 
-            <p class="text-xs text-text-muted mt-4">Compatible with most podcast apps (Apple Podcasts, Overcast, Pocket
-                Casts, etc).</p>
+            <p class="text-xs text-text-muted mt-4">
+                Leave feed authentication off for the smoothest podcast-client setup. Turn it on when you want podcast
+                apps to prompt for credentials before reading feeds or downloading audio.
+            </p>
 
             <input type="hidden" name="concurrent_downloads" value="{{ settings.concurrent_downloads or 3 }}">
             <input type="hidden" name="retention_days" value="{{ settings.retention_days or 30 }}">
@@ -214,6 +231,7 @@
             <input type="hidden" name="app_external_url" value="{{ settings.app_external_url or '' }}">
             <input type="hidden" name="auth_enabled" value="{% if settings.auth_enabled %}on{% endif %}">
             <input type="hidden" name="ip_allowlist" value="{{ settings.ip_allowlist or '' }}">
+            <input type="hidden" name="whitelist_mode" value="{% if settings.whitelist_mode %}on{% endif %}">
             <input type="hidden" name="redirect_to" value="/admin/access">
         </div>
 

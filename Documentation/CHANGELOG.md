@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a toggleable public read-only subscription page at `/subscribe`.
+- Clarified feed protection as an optional podcast subscription security mode.
+- Clarified destructive episode and subscription action labels.
+
 ## 1.3.1 - 2026-06-09
 
 - Fixed `TemplateResponse` compatibility with modern FastAPI and Starlette releases.

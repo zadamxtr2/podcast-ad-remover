@@ -180,6 +180,29 @@ def get_pending_requests_count():
         result = conn.execute("SELECT COUNT(*) FROM access_requests WHERE status = 'pending'").fetchone()
         return result[0] if result else 0
 
+
+def get_setup_status(request: Request, global_settings: dict) -> dict:
+    with get_db_connection() as conn:
+        admin_count = conn.execute("SELECT COUNT(*) AS count FROM users WHERE is_admin = 1").fetchone()["count"]
+        subscription_count = conn.execute("SELECT COUNT(*) AS count FROM subscriptions").fetchone()["count"]
+
+    base_url = get_app_base_url(global_settings, request)
+    feed_auth_enabled = str(global_settings.get("enable_feed_auth")).lower() in ("1", "true", "yes", "on")
+    public_subscribe_enabled = str(global_settings.get("public_subscribe_page_enabled")).lower() in ("1", "true", "yes", "on")
+
+    return {
+        "admin_count": admin_count,
+        "has_admin": admin_count > 0,
+        "auth_enabled": bool(global_settings.get("auth_enabled")),
+        "base_url": base_url,
+        "health_url": f"{base_url}/health",
+        "subscribe_url": f"{base_url}/subscribe",
+        "unified_feed_url": f"{base_url}/feed/unified.xml",
+        "subscription_count": subscription_count,
+        "feed_auth_enabled": feed_auth_enabled,
+        "public_subscribe_enabled": public_subscribe_enabled,
+    }
+
 # --- Authentication Routes ---
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -381,17 +404,53 @@ async def view_settings_redirect():
 @router.get("/admin/system", response_class=HTMLResponse)
 async def admin_system(request: Request):
     user = get_current_user(request)
+    global_settings = get_global_settings()
     return templates.TemplateResponse(
         request=request,
         name="admin/system.html",
         context={
             "csp_nonce": get_csp_nonce(request),
             "user": user,
-            "settings": get_global_settings(),
+            "settings": global_settings,
+            "setup_status": get_setup_status(request, global_settings),
             "pending_requests_count": get_pending_requests_count(),
             "active_tab": "system"
         }
     )
+
+
+@router.post("/admin/setup/admin-user")
+async def create_setup_admin_user(
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+    user = Depends(require_admin)
+):
+    if password != confirm_password:
+        return RedirectResponse(url="/admin/system?error=Passwords+do+not+match", status_code=303)
+    if len(password) < 8:
+        return RedirectResponse(url="/admin/system?error=Password+must+be+at+least+8+characters", status_code=303)
+
+    with get_db_connection() as conn:
+        existing_admin = conn.execute("SELECT COUNT(*) AS count FROM users WHERE is_admin = 1").fetchone()["count"]
+        if existing_admin:
+            return RedirectResponse(url="/admin/system?error=Admin+user+already+exists", status_code=303)
+
+        conn.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)",
+            (username, hash_password(password)),
+        )
+        conn.execute("""
+            UPDATE app_settings
+            SET auth_enabled = 1,
+                require_password_change = 0,
+                initial_password = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        """)
+        conn.commit()
+
+    return RedirectResponse(url="/login?success=Admin+account+created", status_code=303)
 
 @router.post("/admin/system/update")
 async def update_system_settings(

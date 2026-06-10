@@ -10,6 +10,8 @@
 - Added live queue status polling through `/api/queue/status`.
 - Added feed fetch and episode download guardrails for timeouts, size limits, content type, private URL policy, and free disk space.
 - Added initial pytest coverage for migrations, job claiming, feed tokens, and URL guardrails.
+- Added a setup checklist to System Settings with admin-account creation, base URL, subscribe page, and unified feed checks.
+- Added migration backup tests for fresh and existing database initialization.
 - Escaped markdown summary rendering before applying the supported formatting subset.
 - Made feed authentication fail closed when enabled without credentials.
 - Applied the IP allowlist before public feed/audio/subscribe route bypasses.

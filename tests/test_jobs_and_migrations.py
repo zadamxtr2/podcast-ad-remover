@@ -1,5 +1,28 @@
 from app.infra.database import get_db_connection, init_db
 from app.infra.repository import EpisodeRepository, JobRepository
+from app.core.config import settings
+
+
+def test_fresh_init_does_not_create_migration_backup(isolated_data_dir):
+    init_db()
+
+    backup_dir = isolated_data_dir / "backups"
+
+    assert not backup_dir.exists()
+
+
+def test_existing_database_is_backed_up_before_formal_migrations(isolated_data_dir):
+    db_path = isolated_data_dir / "db" / "podcasts.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"")
+
+    init_db()
+
+    backup_dir = isolated_data_dir / "backups"
+    backups = list(backup_dir.glob("podcasts-before-migration-*.db"))
+
+    assert settings.DB_PATH == str(db_path)
+    assert len(backups) == 1
 
 
 def test_init_db_creates_formal_migration_tables(isolated_data_dir):

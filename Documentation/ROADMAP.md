@@ -22,7 +22,7 @@ This roadmap lists improvement candidates. It is not a release commitment.
 
 ## User Experience
 
-- Improve first-run setup for base URL, admin credentials, API keys, and recommended defaults.
+- Expand first-run setup into a guided wizard for API keys and recommended defaults; the current System Settings checklist covers admin credentials and URL/feed checks.
 - Add clearer queue state explanations for failed, rate-limited, ignored, and unprocessed episodes.
 - Add safer backup/export guidance before upgrades.
 - Split large templates and move inline queue/episode JavaScript into static files.

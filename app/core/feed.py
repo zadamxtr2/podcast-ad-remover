@@ -5,7 +5,7 @@ from datetime import datetime
 from time import mktime
 from typing import Optional, Tuple
 from app.core.config import settings
-from app.core.url_utils import validate_http_url
+from app.core.url_utils import validate_http_url, validate_redirect_target
 
 def slugify(text: str) -> str:
     """Convert text to a filename-friendly slug."""
@@ -21,6 +21,7 @@ class FeedManager:
         with httpx.Client(follow_redirects=True, timeout=30.0) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
+                validate_redirect_target(url, str(response.url), allow_private=settings.ALLOW_PRIVATE_FEEDS)
                 content_length = int(response.headers.get("Content-Length") or 0)
                 if content_length and content_length > settings.MAX_FEED_BYTES:
                     raise ValueError("Feed is larger than the configured maximum size")

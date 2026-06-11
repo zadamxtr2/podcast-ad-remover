@@ -27,6 +27,15 @@ def validate_http_url(url: str, allow_private: bool = True) -> str:
     return url
 
 
+def validate_redirect_target(original_url: str, final_url: str, allow_private: bool = True) -> str:
+    """Validate a final response URL after redirects."""
+    try:
+        validate_http_url(final_url, allow_private=allow_private)
+    except ValueError as exc:
+        raise ValueError(f"Redirect target for {original_url} is not allowed: {final_url}") from exc
+    return final_url
+
+
 def is_audio_content_type(content_type: str | None) -> bool:
     if not content_type:
         return True

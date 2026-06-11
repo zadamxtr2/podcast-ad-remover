@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 
-from app.core.config import settings
+from app.core.config import is_default_session_secret, settings
 from app.infra.database import init_db
 from app.core.processor import Processor
 
@@ -39,6 +39,20 @@ for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
 
 logger = logging.getLogger(__name__)
 
+
+def validate_startup_security_settings() -> None:
+    """Fail closed when optional auth is enabled without a real session secret."""
+    from app.infra.database import get_db_connection
+
+    with get_db_connection() as conn:
+        security_row = conn.execute(
+            "SELECT auth_enabled, enable_feed_auth FROM app_settings WHERE id = 1"
+        ).fetchone()
+
+    if security_row and is_default_session_secret() and (security_row["auth_enabled"] or security_row["enable_feed_auth"]):
+        raise RuntimeError("Set SESSION_SECRET_KEY before enabling dashboard or feed authentication")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -46,14 +60,7 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info(f"Database initialized at {settings.DB_PATH}")
     try:
-        from app.infra.database import get_db_connection
-        with get_db_connection() as conn:
-            security_row = conn.execute(
-                "SELECT auth_enabled, enable_feed_auth FROM app_settings WHERE id = 1"
-            ).fetchone()
-        default_secret = settings.SESSION_SECRET_KEY == "super-secret-session-key-change-me"
-        if security_row and default_secret and (security_row["auth_enabled"] or security_row["enable_feed_auth"]):
-            raise RuntimeError("Set SESSION_SECRET_KEY before enabling dashboard or feed authentication")
+        validate_startup_security_settings()
     except RuntimeError:
         raise
     except Exception as e:

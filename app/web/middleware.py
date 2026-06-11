@@ -1,8 +1,8 @@
 from fastapi import Request, HTTPException, status
 from fastapi.responses import Response
-import bcrypt
 import base64
 from app.infra.repository import FeedTokenRepository
+from app.web.auth_utils import verify_feed_password, verify_password
 
 async def feed_auth_middleware(request: Request, call_next):
     """
@@ -62,7 +62,7 @@ async def feed_auth_middleware(request: Request, call_next):
         with get_db_connection() as conn:
             user_row = conn.execute("SELECT password_hash FROM users WHERE username = ?", (username,)).fetchone()
         
-        if not user_row or not bcrypt.checkpw(password.encode('utf-8'), user_row['password_hash'].encode('utf-8')):
+        if not user_row or not verify_password(password, user_row['password_hash']):
             return Response(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 headers={'WWW-Authenticate': 'Basic realm="Podcast Feeds"'}
@@ -84,8 +84,7 @@ async def feed_auth_middleware(request: Request, call_next):
                 headers={'WWW-Authenticate': 'Basic realm="Podcast Feeds"'}
             )
         
-        # Verify password (plaintext for global feed credentials)
-        if password != expected_password_hash:
+        if not verify_feed_password(password, expected_password_hash):
             return Response(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 headers={'WWW-Authenticate': 'Basic realm="Podcast Feeds"'}

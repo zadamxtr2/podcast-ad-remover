@@ -19,7 +19,7 @@ Podcast Ad Remover downloads podcast episodes, processes them to remove ads or p
 - `app/web/`: web routes, templates, authentication helpers, and static files.
 - `app/api/`: subscription and audio endpoints.
 - `Documentation/`: architecture, deployment, release, and maintenance docs.
-- `scripts/`: verification and Docker release helpers.
+- `scripts/`: verification, migration dry-run, and Docker release helpers.
 - `Dockerfile` and `docker-compose.yml`: container build and local compose configuration.
 
 ## Common Commands
@@ -44,6 +44,7 @@ docker compose up -d --build
 - `Documentation/VERSIONING.md`: version bump and Docker tag rules.
 - `Documentation/VERIFICATION.md`: checks to run before merging or releasing.
 - `Documentation/CHANGELOG.md`: release notes.
+- `Documentation/AUDIT_STATUS.md`: current audit branch findings, implementation status, and deferred work.
 - `Documentation/DECISIONS.md`: lightweight decision log.
 - `Documentation/ROADMAP.md`: improvement candidates and future direction.
 - `Documentation/RESOURCE_AUDIT.md`: image size, runtime resource findings, and live-container measurement commands.

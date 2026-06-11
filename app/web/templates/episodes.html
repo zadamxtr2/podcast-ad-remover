@@ -106,6 +106,12 @@
                             Podcast Addict
                         </a>
                     </div>
+                    {% if settings.enable_feed_auth %}
+                    <p class="basis-full text-xs text-amber-300/80 text-center md:text-left max-w-2xl">
+                        These protected subscription links include feed tokens. Treat each full URL as a bearer secret
+                        because anyone with it can read the feed and download audio until the token is revoked.
+                    </p>
+                    {% endif %}
                 </div>
             </div>
 
@@ -871,17 +877,37 @@
     let searchDebounceTimer = null;
     let isSearchMode = false;
 
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+    }
+
+    function encodePathSegment(value) {
+        return encodeURIComponent(String(value ?? ''));
+    }
+
     // Episode Card Template Generator
     function createEpisodeCardHTML(ep, subscriptionSlug) {
-        const status = ep.status || 'unprocessed';
+        const allowedStatuses = ['completed', 'processing', 'ignored', 'deleted', 'failed', 'rate_limited', 'unprocessed', 'pending'];
+        const status = allowedStatuses.includes(ep.status) ? ep.status : 'unprocessed';
         const isManual = ep.is_manual_download ? 'true' : 'false';
-        const title = (ep.title || '').toLowerCase();
-        const listenCount = ep.listen_count || 0;
+        const episodeId = Number.parseInt(ep.id, 10) || 0;
+        const title = escapeHtml(ep.title || '');
+        const titleSearch = escapeHtml((ep.title || '').toLowerCase());
+        const description = escapeHtml(ep.description || '');
+        const pubDate = escapeHtml(ep.pub_date || '');
+        const listenCount = Number.parseInt(ep.listen_count, 10) || 0;
         const formatDuration = (seconds) => {
             if (!seconds) return '-';
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = seconds % 60;
-            const h = Math.floor(seconds / 3600);
+            const totalSeconds = Number.parseInt(seconds, 10) || 0;
+            const m = Math.floor((totalSeconds % 3600) / 60);
+            const s = totalSeconds % 60;
+            const h = Math.floor(totalSeconds / 3600);
             if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
             return `${m}:${s.toString().padStart(2, '0')}`;
         };
@@ -906,11 +932,12 @@
         // Action buttons
         let actionButtons = '';
         if (status === 'completed' && ep.local_filename) {
-            const filename = ep.local_filename.split('/').pop();
-            const guid = (ep.guid || '').replace(/\//g, '_').replace(/ /g, '_');
-            actionButtons = `<a href="/audio/${subscriptionSlug}/${guid}/${filename}" target="_blank" onclick="trackListen(${ep.id})" class="p-2 bg-primary-500 rounded-full text-white hover:bg-primary-400 hover:scale-105 transition-all shadow-lg" title="Play"><svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></a>`;
+            const filename = String(ep.local_filename).split(/[\\/]/).pop();
+            const guid = String(ep.guid || '').replace(/\//g, '_').replace(/ /g, '_');
+            const audioHref = `/audio/${encodePathSegment(subscriptionSlug)}/${encodePathSegment(guid)}/${encodePathSegment(filename)}`;
+            actionButtons = `<a href="${audioHref}" target="_blank" onclick="trackListen(${episodeId})" class="p-2 bg-primary-500 rounded-full text-white hover:bg-primary-400 hover:scale-105 transition-all shadow-lg" title="Play"><svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></a>`;
         } else if (status === 'unprocessed' || status === 'ignored') {
-            actionButtons = `<button onclick="downloadEpisode(${ep.id})" class="p-2 text-text-muted hover:text-white hover:bg-white/10 rounded-full transition-colors" title="Download"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg></button>`;
+            actionButtons = `<button onclick="downloadEpisode(${episodeId})" class="p-2 text-text-muted hover:text-white hover:bg-white/10 rounded-full transition-colors" title="Download"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg></button>`;
         }
 
         const hasTranscript = ep.transcript_path ? 'true' : 'false';
@@ -919,32 +946,32 @@
         return `
         <div class="episode-card card flex flex-col relative overflow-visible group transition-all duration-300 h-full border hover:border-white/10"
             data-status="${status}" data-manual="${isManual}"
-            data-title="${title}" data-date="${ep.pub_date}" data-listen-count="${listenCount}"
-            id="card-${ep.id}">
+            data-title="${titleSearch}" data-date="${pubDate}" data-listen-count="${listenCount}"
+            id="card-${episodeId}">
             <div class="checkbox-wrapper absolute top-4 left-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity" onclick="event.stopPropagation();">
-                <input type="checkbox" name="episode_ids" value="${ep.id}" class="h-5 w-5 rounded border-white/20 bg-surface-elevated text-primary-500 focus:ring-primary-500 cursor-pointer shadow-lg episode-checkbox" onchange="updateBatchActions()">
+                <input type="checkbox" name="episode_ids" value="${episodeId}" class="h-5 w-5 rounded border-white/20 bg-surface-elevated text-primary-500 focus:ring-primary-500 cursor-pointer shadow-lg episode-checkbox" onchange="updateBatchActions()">
             </div>
-            <div class="flex-1 p-4 flex flex-col cursor-pointer relative" onclick="toggleDescription('${ep.id}')">
+            <div class="flex-1 p-4 flex flex-col cursor-pointer relative" onclick="toggleDescription('${episodeId}')">
                 <div class="flex justify-between items-start mb-3">
                     <div class="flex items-center gap-2 text-[11px] font-bold tracking-wider text-text-muted uppercase">
-                        <span class="date-relative" data-date="${ep.pub_date}">${ep.pub_date}</span>
+                        <span class="date-relative" data-date="${pubDate}">${pubDate}</span>
                         <span class="text-white/10 dot-separator">•</span>
-                        <span>${formatDuration(ep.duration)}</span>
+                        <span>${escapeHtml(formatDuration(ep.duration))}</span>
                     </div>
                 </div>
-                <h3 class="font-display text-lg font-bold text-text-primary leading-snug mb-3 group-hover:text-primary-300 transition-colors" title="${ep.title}">
+                <h3 class="font-display text-lg font-bold text-text-primary leading-snug mb-3 group-hover:text-primary-300 transition-colors" title="${title}">
                     ${statusBadge}
-                    <span class="block mt-5">${ep.title}${playsBadge}</span>
+                    <span class="block mt-5">${title}${playsBadge}</span>
                 </h3>
                 <div class="mb-4 text-sm leading-relaxed text-text-secondary cursor-pointer group/ep-desc relative" onclick="this.classList.toggle('expanded'); event.stopPropagation();">
-                    ${ep.description ? `<div class="py-1 px-1"><div class="line-clamp-4 group-[.expanded]/ep-desc:line-clamp-none transition-all duration-500 ease-in-out text-text-secondary/90">${ep.description}</div></div>` : ''}
+                    ${description ? `<div class="py-1 px-1"><div class="line-clamp-4 group-[.expanded]/ep-desc:line-clamp-none transition-all duration-500 ease-in-out text-text-secondary/90">${description}</div></div>` : ''}
                 </div>
             </div>
             <div class="px-4 py-3 flex justify-between items-center bg-surface-base/95 md:bg-surface-base/30 md:backdrop-blur-sm" onclick="event.stopPropagation();">
                 <div class="flex items-center gap-2 list-actions">
                     ${actionButtons}
                     <div class="relative inline-block text-left">
-                        <button onclick="showActionSheet(event, ${ep.id}, ${hasTranscript}, ${hasReport})" class="p-2 text-text-muted hover:text-white transition-colors rounded-full hover:bg-white/10" title="More">
+                        <button onclick="showActionSheet(event, ${episodeId}, ${hasTranscript}, ${hasReport})" class="p-2 text-text-muted hover:text-white transition-colors rounded-full hover:bg-white/10" title="More">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01"></path></svg>
                         </button>
                     </div>

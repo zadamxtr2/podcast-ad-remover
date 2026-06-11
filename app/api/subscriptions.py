@@ -5,6 +5,7 @@ from app.infra.repository import SubscriptionRepository, EpisodeRepository
 from app.core.feed import FeedManager
 from app.core.processor import Processor
 from app.core.search import PodcastSearcher
+from app.web.auth import require_auth
 from pydantic import BaseModel
 import shutil
 import os
@@ -19,21 +20,21 @@ def get_processor():
     return Processor()
 
 @router.get("/subscriptions", response_model=List[Subscription])
-async def list_subscriptions():
+async def list_subscriptions(user = Depends(require_auth)):
     return repo.get_all()
 
 @router.post("/subscriptions", response_model=Subscription)
-async def create_subscription(sub: SubscriptionCreate, initial_count: int = 5):
+async def create_subscription(sub: SubscriptionCreate, initial_count: int = 5, user = Depends(require_auth)):
     existing = repo.get_by_url(sub.feed_url)
     if existing:
         raise HTTPException(status_code=400, detail="Subscription already exists")
     
     try:
         # Parse feed to get title
-        title, slug, image_url = FeedManager.parse_feed(sub.feed_url)
+        title, slug, image_url, description = FeedManager.parse_feed(sub.feed_url)
         
         # Save to DB
-        new_sub = repo.create(sub, title, slug, image_url)
+        new_sub = repo.create(sub, title, slug, image_url, description=description)
         
         # Trigger initial check
         proc = get_processor()
@@ -48,7 +49,7 @@ async def create_subscription(sub: SubscriptionCreate, initial_count: int = 5):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/subscriptions/{id}")
-async def delete_subscription(id: int):
+async def delete_subscription(id: int, user = Depends(require_auth)):
     """Delete a subscription and remove local files for its episodes."""
     sub = repo.get_by_id(id)
     
@@ -87,7 +88,7 @@ async def delete_subscription(id: int):
     return {"status": "deleted"}
 
 @router.delete("/episodes/{id}")
-async def delete_episode(id: int):
+async def delete_episode(id: int, user = Depends(require_auth)):
     """Ignore a specific episode and remove its local files."""
     proc = get_processor()
     success = await proc.delete_episode(id)
@@ -96,7 +97,7 @@ async def delete_episode(id: int):
     return {"status": "deleted"}
 
 @router.post("/subscriptions/{id}/check")
-async def check_subscription_updates(id: int, background_tasks: BackgroundTasks):
+async def check_subscription_updates(id: int, background_tasks: BackgroundTasks, user = Depends(require_auth)):
     """Trigger a check for new episodes."""
     # We allow running check_feeds in background task because it's I/O bound (network)
     # and doesn't use heavy CPU. The background loop will then pick up any new pending episodes.
@@ -105,7 +106,7 @@ async def check_subscription_updates(id: int, background_tasks: BackgroundTasks)
     return {"status": "check_triggered"}
 
 @router.post("/episodes/{id}/process")
-async def process_episode(id: int, skip_transcription: bool = False):
+async def process_episode(id: int, skip_transcription: bool = False, user = Depends(require_auth)):
     """Manually trigger processing for an episode."""
     ep_repo = EpisodeRepository()
     
@@ -121,7 +122,7 @@ async def process_episode(id: int, skip_transcription: bool = False):
     return {"status": "processing_triggered"}
 
 @router.post("/episodes/{id}/cancel")
-async def cancel_episode(id: int):
+async def cancel_episode(id: int, user = Depends(require_auth)):
     """Cancel processing, ignore the episode, and remove local files."""
     proc = get_processor()
     success = await proc.delete_episode(id)
@@ -133,11 +134,11 @@ class SearchQuery(BaseModel):
     query: str
 
 @router.post("/search")
-async def search_podcasts(q: SearchQuery):
+async def search_podcasts(q: SearchQuery, user = Depends(require_auth)):
     return await PodcastSearcher.search(q.query)
 
 @router.post("/episodes/{id}/track-listen")
-async def track_listen(id: int):
+async def track_listen(id: int, user = Depends(require_auth)):
     """Increment listen count for an episode."""
     ep_repo = EpisodeRepository()
     ep = ep_repo.get_by_id(id)

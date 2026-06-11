@@ -61,6 +61,49 @@ def _read_memory():
     }
 
 
+def _directory_size(path: str) -> int:
+    if not os.path.exists(path):
+        return 0
+    if os.path.isfile(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    total = 0
+    for root, _, files in os.walk(path):
+        for filename in files:
+            file_path = os.path.join(root, filename)
+            try:
+                total += os.path.getsize(file_path)
+            except OSError:
+                continue
+    return total
+
+
+def _storage_breakdown() -> list[dict]:
+    data_dir = settings.DATA_DIR
+    categories = [
+        ("podcasts", "Podcast Files", settings.PODCASTS_DIR),
+        ("models", "Models", settings.MODELS_DIR),
+        ("feeds", "Feeds", settings.FEEDS_DIR),
+        ("database", "Database", os.path.dirname(settings.DB_PATH)),
+        ("backups", "Backups", os.path.join(data_dir, "backups")),
+        ("logs", "Logs", os.path.join(data_dir, "app.log")),
+    ]
+
+    return [
+        {
+            "key": key,
+            "label": label,
+            "bytes": size,
+            "display": _format_bytes(size),
+        }
+        for key, label, path in categories
+        for size in [_directory_size(path)]
+    ]
+
+
 def get_operation_status() -> dict:
     disk = shutil.disk_usage(settings.DATA_DIR)
     now = datetime.now()
@@ -116,5 +159,6 @@ def get_operation_status() -> dict:
             "total_display": _format_bytes(disk.total),
             "used_display": _format_bytes(disk.used),
             "free_display": _format_bytes(disk.free),
+            "breakdown": _storage_breakdown(),
         },
     }

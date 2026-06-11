@@ -79,6 +79,17 @@ FORMAL_MIGRATIONS = [
     ),
 ]
 
+SQLITE_BUSY_TIMEOUT_MS = 30000
+
+
+def _connect_db() -> sqlite3.Connection:
+    """Open SQLite with the same lock-tolerant settings for startup and runtime."""
+    conn = sqlite3.connect(settings.DB_PATH, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    return conn
+
 
 def _backup_database_if_needed(migration_ids: list[str]):
     """Create a timestamped DB backup before applying formal migrations."""
@@ -119,7 +130,7 @@ def _apply_formal_migrations(conn: sqlite3.Connection, create_backup: bool):
 def init_db():
     """Initialize the database with the schema."""
     db_existed = os.path.exists(settings.DB_PATH)
-    conn = sqlite3.connect(settings.DB_PATH)
+    conn = _connect_db()
     cursor = conn.cursor()
     
     # Subscriptions Table
@@ -205,6 +216,11 @@ def init_db():
     
     # Ensure default settings exist
     cursor.execute("INSERT OR IGNORE INTO app_settings (id) VALUES (1)")
+
+    try:
+        cursor.execute("ALTER TABLE app_settings ADD COLUMN summary_prompt_template TEXT")
+    except sqlite3.OperationalError:
+        pass
     
     # Set default summary prompt template if not set
     cursor.execute("""
@@ -386,12 +402,7 @@ Transcript Context: {transcript_context}""",))
 @contextmanager
 def get_db_connection():
     """Get a database connection."""
-    conn = sqlite3.connect(settings.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    # Enable WAL mode for better concurrency
-    conn.execute("PRAGMA journal_mode=WAL")
-    # Set a busy timeout to avoid 'database is locked' errors during heavy processing
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn = _connect_db()
     try:
         yield conn
     finally:

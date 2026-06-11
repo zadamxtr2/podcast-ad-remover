@@ -56,8 +56,8 @@
             <div id="auth_settings" style="display: {% if settings.auth_enabled %}block{% else %}none{% endif %}">
                 <label class="block text-sm font-medium text-text-secondary mb-2">IP Allowlist (optional)</label>
                 <input type="text" name="ip_allowlist" value="{{ settings.ip_allowlist or '' }}"
-                    placeholder="192.168.1.100, 10.0.0.5" class="input">
-                <p class="text-xs text-text-muted mt-1">Comma-separated list of IPs allowed to access admin panel. Leave
+                    placeholder="192.168.1.100, 10.0.0.0/24" class="input">
+                <p class="text-xs text-text-muted mt-1">Comma-separated list of IPs or CIDR ranges allowed to access the app. Leave
                     blank to allow all IPs.</p>
             </div>
 
@@ -215,14 +215,52 @@
                     {% if not settings.app_external_url %}{% set display_url = "https://your-public-url.com" %}{% endif %}
                     {{ display_url }}/feeds/SLUG.xml?token=GENERATED_TOKEN
                 </code>
-                <p class="text-xs text-text-muted mt-2">Protected links use generated feed tokens. Existing Basic Auth
-                    and older auth links continue to work for compatibility.</p>
+                <p class="text-xs text-text-muted mt-2">Protected links use generated feed tokens. Treat any URL
+                    containing <code class="bg-surface-elevated px-1 rounded">token=</code> as a bearer secret: anyone
+                    with that full URL can read the protected feed and download audio until the token is revoked.
+                    Existing Basic Auth and older auth links continue to work for compatibility.</p>
                 <form method="post" action="/admin/feed-token/regenerate" class="mt-3">
                     <button type="submit" class="btn-secondary btn-sm"
                         onclick="return confirm('Regenerate your feed token? Podcast apps using the previous token will need updated feed URLs.')">
                         Regenerate Feed Token
                     </button>
                 </form>
+                <div class="mt-4 overflow-x-auto rounded-lg border border-white/[0.06]">
+                    <table class="table-dark">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Owner</th>
+                                <th>Created</th>
+                                <th>Last Used</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for token in active_feed_tokens %}
+                            <tr>
+                                <td class="whitespace-nowrap font-medium">{{ token.name }}</td>
+                                <td class="whitespace-nowrap text-text-secondary">{{ token.username or 'Shared' }}</td>
+                                <td class="whitespace-nowrap text-text-secondary">{{ token.created_at }}</td>
+                                <td class="whitespace-nowrap text-text-secondary">{{ token.last_used_at or 'Never' }}</td>
+                                <td class="whitespace-nowrap text-right">
+                                    <form method="post" action="/admin/feed-token/{{ token.id }}/revoke" style="display:inline">
+                                        <button type="submit" class="text-red-400 hover:text-red-300 font-medium"
+                                            onclick="return confirm('Revoke this feed token? Podcast apps using it will need updated feed URLs.')">
+                                            Revoke
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% if not active_feed_tokens %}
+                    <div class="text-center py-4">
+                        <p class="text-text-muted text-sm">No active feed tokens yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
             </div>
             {% endif %}
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -9,6 +9,8 @@ class SubscriptionCreate(SubscriptionBase):
     pass
 
 class Subscription(SubscriptionBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: Optional[str] = None
     description: Optional[str] = None
@@ -36,9 +38,6 @@ class Subscription(SubscriptionBase):
     manual_retention_days: Optional[int] = 14
     retention_limit: Optional[int] = 1
 
-    class Config:
-        from_attributes = True
-
 class EpisodeBase(BaseModel):
     guid: str
     title: str
@@ -47,6 +46,8 @@ class EpisodeBase(BaseModel):
     duration: Optional[int] = None
 
 class Episode(EpisodeBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     subscription_id: int
     status: str
@@ -62,11 +63,14 @@ class Episode(EpisodeBase):
     report_path: Optional[str] = None
     file_size: Optional[int] = None
     local_filename: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    retry_count: int = 0
+    next_retry_at: Optional[datetime] = None
+    is_manual_download: bool = False
+    listen_count: int = 0
 
 class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     username: str
     password_hash: str
@@ -74,10 +78,9 @@ class User(BaseModel):
     created_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
 class AccessRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     username: str
     email: Optional[str] = None
@@ -88,16 +91,12 @@ class AccessRequest(BaseModel):
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
 class LoginAttempt(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     username: Optional[str] = None
     ip_address: Optional[str] = None
     success: bool
     timestamp: Optional[datetime] = None
     user_agent: Optional[str] = None
-
-    class Config:
-        from_attributes = True

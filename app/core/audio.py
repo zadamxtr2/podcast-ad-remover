@@ -20,6 +20,40 @@ class AudioProcessor:
         return ["-threads", str(threads)] if threads > 0 else []
 
     @staticmethod
+    def _calculate_keep_segments(total_duration: float, remove_segments: List[Dict[str, float]]) -> List[tuple[float, float]]:
+        """Convert remove segments into clamped, ordered keep segments."""
+        if total_duration <= 0:
+            return []
+
+        current_time = 0.0
+        keep_segments = []
+
+        normalized_remove_segments = []
+        for segment in remove_segments:
+            try:
+                start = max(0.0, float(segment["start"]))
+                end = min(total_duration, float(segment["end"]))
+            except (KeyError, TypeError, ValueError):
+                logger.warning(f"Skipping invalid remove segment: {segment}")
+                continue
+
+            if end <= start:
+                logger.warning(f"Skipping empty remove segment: {segment}")
+                continue
+
+            normalized_remove_segments.append((start, end))
+
+        for start, end in sorted(normalized_remove_segments, key=lambda item: item[0]):
+            if start > current_time:
+                keep_segments.append((current_time, start))
+            current_time = max(current_time, end)
+
+        if current_time < total_duration:
+            keep_segments.append((current_time, total_duration))
+
+        return keep_segments
+
+    @staticmethod
     def get_duration(file_path: str) -> float:
         """Get duration in seconds using ffprobe."""
         cmd = [
@@ -60,23 +94,7 @@ class AudioProcessor:
             return
 
         total_duration = AudioProcessor.get_duration(input_path)
-        keep_segments = []
-        current_time = 0.0
-        
-        # Sort segments by start time
-        sorted_segments = sorted(remove_segments, key=lambda x: x['start'])
-        
-        for seg in sorted_segments:
-            start = seg['start']
-            end = seg['end']
-            
-            if start > current_time:
-                keep_segments.append((current_time, start))
-            
-            current_time = max(current_time, end)
-            
-        if current_time < total_duration:
-            keep_segments.append((current_time, total_duration))
+        keep_segments = AudioProcessor._calculate_keep_segments(total_duration, remove_segments)
             
         logger.info(f"Keeping segments: {keep_segments}")
         
@@ -152,7 +170,6 @@ class AudioProcessor:
             logger.info(f"Successfully prepended audio to {output_path}")
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to prepend audio: {e}")
-            raise
             raise
             
     @staticmethod

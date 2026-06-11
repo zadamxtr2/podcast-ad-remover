@@ -169,6 +169,12 @@
                 Unified RSS Feed
             </h3>
             <p class="text-text-secondary text-sm mt-1">Subscribe to all podcasts in one feed</p>
+            {% if settings.enable_feed_auth %}
+            <p class="text-xs text-amber-300/80 mt-2 max-w-xl">
+                These protected subscription links include feed tokens. Treat each full URL as a bearer secret because
+                anyone with it can read the feed and download audio until the token is revoked.
+            </p>
+            {% endif %}
         </div>
         <div class="flex flex-wrap gap-3 justify-center md:justify-start items-center">
             <a href="{{ unified_links.direct }}" class="badge-soft hover:glow-primary"
@@ -365,6 +371,16 @@
 </script>
 
 <script nonce="{{ csp_nonce }}">
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+    }
+
     async function searchPodcasts() {
         const query = document.getElementById('search-input').value;
         const resultsDiv = document.getElementById('search-results');
@@ -399,18 +415,22 @@
             });
 
             data.forEach(pod => {
+                const image = escapeHtml(pod.image || '');
+                const title = escapeHtml(pod.title || 'Untitled podcast');
+                const description = escapeHtml(pod.description || '');
+                const feedUrl = escapeHtml(pod.feed_url || '');
                 const el = document.createElement('div');
                 el.className = 'flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-surface-base rounded-xl border border-white/[0.06] hover:border-primary-500/30 transition-colors';
                 el.innerHTML = `
                 <div class="flex items-center gap-4 flex-1 min-w-0">
-                    <img src="${pod.image}" class="w-14 h-14 shrink-0 rounded-lg object-cover bg-surface-hover">
+                    <img src="${image}" class="w-14 h-14 shrink-0 rounded-lg object-cover bg-surface-hover">
                     <div class="min-w-0">
-                        <h4 class="font-bold text-sm sm:truncate">${pod.title}</h4>
-                        <p class="text-xs text-text-muted line-clamp-2 sm:truncate">${pod.description}</p>
+                        <h4 class="font-bold text-sm sm:truncate">${title}</h4>
+                        <p class="text-xs text-text-muted line-clamp-2 sm:truncate">${description}</p>
                     </div>
                 </div>
                 <form action="/add" method="post" class="flex items-center gap-2 sm:shrink-0">
-                    <input type="hidden" name="feed_url" value="${pod.feed_url}">
+                    <input type="hidden" name="feed_url" value="${feedUrl}">
                     <select name="initial_count" class="select text-sm py-2 min-w-[80px]" aria-label="Episodes to download">
                         ${optionsHtml}
                     </select>

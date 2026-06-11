@@ -29,6 +29,19 @@
         </div>
     </div>
 
+    {% if setup_status.security_warnings %}
+    <div class="mt-5 space-y-2">
+        {% for warning in setup_status.security_warnings %}
+        <div class="alert-warning">
+            <div>
+                <p class="font-medium">Security setting needs attention</p>
+                <p class="text-sm text-text-secondary mt-1">{{ warning }}</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     {% if not setup_status.has_admin %}
     <form method="post" action="/admin/setup/admin-user" class="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/10 p-4">
         <h3 class="font-semibold text-amber-300 mb-3">Create Admin Account</h3>

@@ -54,6 +54,14 @@
             <div class="progress-bar-fill" data-disk-used-bar style="width: {{ operation_status.disk.used_percent }}%"></div>
         </div>
         <p class="text-xs text-text-muted mt-2"><span data-disk-used>{{ operation_status.disk.used_percent }}</span>% used of {{ operation_status.disk.total_display }}</p>
+        <div class="mt-3 space-y-1" data-storage-breakdown>
+            {% for item in operation_status.disk.breakdown %}
+            <div class="flex justify-between gap-3 text-xs">
+                <span class="text-text-muted truncate">{{ item.label }}</span>
+                <span class="text-text-secondary font-mono">{{ item.display }}</span>
+            </div>
+            {% endfor %}
+        </div>
     </div>
     <div class="bg-surface-base rounded-xl border border-white/[0.06] p-4">
         <p class="text-xs uppercase tracking-wide text-text-muted mb-2">Memory / CPU</p>
@@ -298,6 +306,18 @@
             return status || 'Queued';
         }
 
+        function escapeHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, function (char) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[char];
+            });
+        }
+
         async function refreshQueueState() {
             try {
                 const response = await fetch('/api/queue/status', { headers: { 'Accept': 'application/json' } });
@@ -333,9 +353,18 @@
                     const diskFree = document.querySelector('[data-disk-free]');
                     const diskUsed = document.querySelector('[data-disk-used]');
                     const diskBar = document.querySelector('[data-disk-used-bar]');
+                    const storageBreakdown = document.querySelector('[data-storage-breakdown]');
                     if (diskFree) diskFree.textContent = status.disk.free_display;
                     if (diskUsed) diskUsed.textContent = status.disk.used_percent;
                     if (diskBar) diskBar.style.width = `${status.disk.used_percent}%`;
+                    if (storageBreakdown && Array.isArray(status.disk.breakdown)) {
+                        storageBreakdown.innerHTML = status.disk.breakdown.map(function (item) {
+                            return `<div class="flex justify-between gap-3 text-xs">
+                                <span class="text-text-muted truncate">${escapeHtml(item.label)}</span>
+                                <span class="text-text-secondary font-mono">${escapeHtml(item.display)}</span>
+                            </div>`;
+                        }).join('');
+                    }
                 }
                 if (status.memory) {
                     const memoryUsed = document.querySelector('[data-memory-used]');

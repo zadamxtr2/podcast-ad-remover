@@ -1,8 +1,13 @@
 import os
 from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsConfigDict
 from pydantic import Field
 
+DEFAULT_SESSION_SECRET_KEY = "super-secret-session-key-change-me"
+
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env")
+
     # Core
     ENVIRONMENT: str = Field("production", description="Environment: development or production")
     GEMINI_API_KEY: str | None = Field(None, description="Google Gemini API Key (comma-separated for multiple keys)")
@@ -10,7 +15,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = Field(None, description="Anthropic API Key")
     OPENROUTER_API_KEY: str | None = Field(None, description="OpenRouter API Key")
     LOG_LEVEL: str = "INFO"
-    SESSION_SECRET_KEY: str = Field("super-secret-session-key-change-me", description="Secret key for session encryption")
+    SESSION_SECRET_KEY: str = Field(DEFAULT_SESSION_SECRET_KEY, description="Secret key for session encryption")
     
     # Paths
     DATA_DIR: str = "/data"
@@ -21,6 +26,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     BASE_URL: str = "http://localhost:8000"
     COOKIE_SECURE: bool = False
+    TRUST_PROXY_HEADERS: bool = False
     
     # Processing
     CHECK_INTERVAL_MINUTES: int = 60
@@ -68,10 +74,11 @@ class Settings(BaseSettings):
         """Get the directory path for a specific episode"""
         return os.path.join(self.PODCASTS_DIR, podcast_slug, episode_slug)
 
-    class Config:
-        env_file = ".env"
-
 settings = Settings()
+
+
+def is_default_session_secret() -> bool:
+    return settings.SESSION_SECRET_KEY == DEFAULT_SESSION_SECRET_KEY
 
 # Ensure directories exist
 for path in [

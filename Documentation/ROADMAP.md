@@ -4,21 +4,18 @@ This roadmap lists improvement candidates. It is not a release commitment.
 
 ## Reliability
 
-- Add a real Python test suite around feed parsing, episode status transitions, RSS generation, and audio route authorization.
+- Expand Python coverage around full processor lifecycle transitions and service boundaries.
 - Expand migration tests so they run against a copied realistic `podcasts.db`.
 - Continue expanding the durable job model with recovery tooling for orphaned work directories and richer worker lease visibility.
 
 ## Security
 
-- Require a generated `SESSION_SECRET_KEY` in production rather than falling back to the development default.
-- Add feed-token management beyond current session token regeneration, including listing and revoking old tokens.
-- Tighten admin/API authorization tests before adding more remote management features.
+- Tighten admin/API authorization tests further before adding more remote management features.
 
 ## Resource Usage
 
 - Add documented concurrency and CPU guidance for small homelab machines.
 - Make Whisper model choice, worker limits, cleanup policy, and retry settings easier to reason about from the UI.
-- Add per-category storage reporting for original audio, processed audio, transcripts, and models.
 
 ## User Experience
 
@@ -31,4 +28,3 @@ This roadmap lists improvement candidates. It is not a release commitment.
 
 - Continue migrating new schema work to explicit migrations; older ad hoc column migrations remain for backward compatibility.
 - Split very large route and processor modules when tests are in place.
-- Add CI that runs verification on pull requests.

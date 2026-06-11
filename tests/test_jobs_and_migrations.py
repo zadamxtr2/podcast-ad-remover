@@ -1,3 +1,5 @@
+import sqlite3
+
 from app.infra.database import get_db_connection, init_db
 from app.infra.repository import EpisodeRepository, JobRepository
 from app.core.config import settings
@@ -63,6 +65,108 @@ def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
     assert "google/gemini-3-flash-preview" in row["openrouter_model"]
 
 
+def test_database_connections_use_wal_and_busy_timeout(isolated_data_dir):
+    init_db()
+
+    with get_db_connection() as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+
+    assert journal_mode == "wal"
+    assert busy_timeout == 30000
+
+
+def test_legacy_database_rows_survive_and_pending_work_is_backfilled(isolated_data_dir):
+    db_path = isolated_data_dir / "db" / "podcasts.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feed_url TEXT UNIQUE NOT NULL,
+            title TEXT,
+            slug TEXT UNIQUE,
+            is_active BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_checked_at TIMESTAMP
+        );
+        CREATE TABLE app_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            whisper_model TEXT DEFAULT 'base',
+            concurrent_downloads INTEGER DEFAULT 2,
+            retention_days INTEGER DEFAULT 30
+        );
+        CREATE TABLE episodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subscription_id INTEGER NOT NULL,
+            guid TEXT NOT NULL,
+            title TEXT NOT NULL,
+            pub_date TIMESTAMP,
+            original_url TEXT NOT NULL,
+            duration INTEGER,
+            status TEXT DEFAULT 'pending',
+            processed_at TIMESTAMP,
+            error_message TEXT,
+            local_filename TEXT,
+            retry_count INTEGER DEFAULT 0,
+            next_retry_at TIMESTAMP,
+            FOREIGN KEY (subscription_id) REFERENCES subscriptions (id),
+            UNIQUE(subscription_id, guid)
+        );
+        INSERT INTO app_settings (id, whisper_model, concurrent_downloads, retention_days)
+        VALUES (1, 'tiny', 1, 7);
+        INSERT INTO subscriptions (id, feed_url, title, slug)
+        VALUES (1, 'https://example.com/feed.xml', 'Legacy Show', 'legacy-show');
+        INSERT INTO episodes (subscription_id, guid, title, original_url, status, error_message, retry_count, next_retry_at)
+        VALUES
+            (1, 'pending-guid', 'Pending Episode', 'https://example.com/pending.mp3', 'pending', NULL, 0, NULL),
+            (1, 'completed-guid', 'Completed Episode', 'https://example.com/completed.mp3', 'completed', NULL, 0, NULL),
+            (1, 'failed-guid', 'Failed Episode', 'https://example.com/failed.mp3', 'failed', 'temporary failure', 2, CURRENT_TIMESTAMP);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    init_db()
+
+    with get_db_connection() as migrated:
+        subscription = migrated.execute("SELECT title, slug FROM subscriptions WHERE id = 1").fetchone()
+        app_settings = migrated.execute(
+            "SELECT whisper_model, concurrent_downloads, retention_days FROM app_settings WHERE id = 1"
+        ).fetchone()
+        episodes = {
+            row["guid"]: row
+            for row in migrated.execute("SELECT guid, title, status FROM episodes").fetchall()
+        }
+        jobs = {
+            row["guid"]: row
+            for row in migrated.execute(
+                """
+                SELECT e.guid, j.status, j.attempts, j.error
+                FROM jobs j
+                JOIN episodes e ON e.id = j.episode_id
+                """
+            ).fetchall()
+        }
+        backups = list((isolated_data_dir / "backups").glob("podcasts-before-migration-*.db"))
+
+    assert subscription["title"] == "Legacy Show"
+    assert subscription["slug"] == "legacy-show"
+    assert app_settings["whisper_model"] == "tiny"
+    assert app_settings["concurrent_downloads"] == 1
+    assert app_settings["retention_days"] == 7
+    assert episodes["pending-guid"]["title"] == "Pending Episode"
+    assert episodes["completed-guid"]["status"] == "completed"
+    assert jobs["pending-guid"]["status"] == "queued"
+    assert jobs["pending-guid"]["attempts"] == 0
+    assert jobs["failed-guid"]["status"] == "retry_scheduled"
+    assert jobs["failed-guid"]["error"] == "temporary failure"
+    assert "completed-guid" not in jobs
+    assert len(backups) == 1
+
+
 def test_pending_episode_creates_and_claims_job(isolated_data_dir):
     init_db()
 
@@ -106,3 +210,75 @@ def test_pending_episode_creates_and_claims_job(isolated_data_dir):
     assert job["status"] == "running"
     assert job["attempts"] == 1
     assert job["locked_by"] == "pytest-worker"
+
+
+def test_stale_running_job_is_recovered_and_claimable(isolated_data_dir):
+    init_db()
+    with get_db_connection() as conn:
+        subscription_id = conn.execute(
+            "INSERT INTO subscriptions (feed_url, title, slug) VALUES (?, ?, ?)",
+            ("https://example.com/feed.xml", "Example", "example"),
+        ).lastrowid
+        episode_id = conn.execute(
+            """
+            INSERT INTO episodes (subscription_id, guid, title, original_url, status, processing_step, progress)
+            VALUES (?, ?, ?, ?, 'processing', 'transcribing', 42)
+            """,
+            (subscription_id, "stale-episode", "Stale Episode", "https://example.com/stale.mp3"),
+        ).lastrowid
+        conn.execute(
+            """
+            INSERT INTO jobs (episode_id, type, status, attempts, locked_at, locked_by)
+            VALUES (?, 'process_episode', 'running', 1, datetime(CURRENT_TIMESTAMP, '-2 days'), 'dead-worker')
+            """,
+            (episode_id,),
+        )
+        conn.commit()
+
+    job_repo = JobRepository()
+    recovered = job_repo.recover_stale_running(max_age_minutes=60)
+
+    assert recovered == 1
+    assert job_repo.count_claimable() == 1
+
+    with get_db_connection() as conn:
+        job = conn.execute("SELECT status, locked_at, locked_by, error FROM jobs").fetchone()
+        episode = conn.execute("SELECT status, processing_step, progress FROM episodes").fetchone()
+
+    assert job["status"] == "queued"
+    assert job["locked_at"] is None
+    assert job["locked_by"] is None
+    assert "worker interruption" in job["error"]
+    assert episode["status"] == "pending"
+    assert episode["processing_step"] == "retry scheduled after worker interruption"
+    assert episode["progress"] == 0
+
+
+def test_recent_running_job_is_not_recovered(isolated_data_dir):
+    init_db()
+    with get_db_connection() as conn:
+        subscription_id = conn.execute(
+            "INSERT INTO subscriptions (feed_url, title, slug) VALUES (?, ?, ?)",
+            ("https://example.com/feed.xml", "Example", "example"),
+        ).lastrowid
+        episode_id = conn.execute(
+            """
+            INSERT INTO episodes (subscription_id, guid, title, original_url, status, processing_step, progress)
+            VALUES (?, ?, ?, ?, 'processing', 'transcribing', 42)
+            """,
+            (subscription_id, "recent-episode", "Recent Episode", "https://example.com/recent.mp3"),
+        ).lastrowid
+        conn.execute(
+            """
+            INSERT INTO jobs (episode_id, type, status, attempts, locked_at, locked_by)
+            VALUES (?, 'process_episode', 'running', 1, CURRENT_TIMESTAMP, 'active-worker')
+            """,
+            (episode_id,),
+        )
+        conn.commit()
+
+    job_repo = JobRepository()
+
+    assert job_repo.recover_stale_running(max_age_minutes=60) == 0
+    assert job_repo.count_running() == 1
+    assert job_repo.count_claimable() == 0

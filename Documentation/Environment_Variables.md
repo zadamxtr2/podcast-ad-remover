@@ -21,12 +21,14 @@ Gemini direct access uses Google's OpenAI-compatible endpoint through the OpenAI
 |----------|-------------|---------|
 | `DATA_DIR` | Directory for internal data (DB, temp) | `/data` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+| `SESSION_SECRET_KEY` | Session signing key. Set a unique value before enabling dashboard or feed authentication. | `super-secret-session-key-change-me` |
 | `CHECK_INTERVAL_MINUTES` | How often to check for new episodes | `60` |
 | `WHISPER_MODEL` | Whisper model size | `base` |
 | `HOST` | Host to bind to | `0.0.0.0` |
 | `PORT` | Port to bind to | `8000` |
 | `BASE_URL` | Public URL for the RSS feeds | `http://localhost:8000` |
 | `COOKIE_SECURE` | Set session cookies as HTTPS-only. Use `true` behind HTTPS. | `false` |
+| `TRUST_PROXY_HEADERS` | Trust `CF-Connecting-IP`, `X-Forwarded-For`, and `X-Real-IP` for login rate limits, IP allowlists, and listen tracking. Only enable behind a reverse proxy that strips client-supplied copies of these headers. | `false` |
 | `MAX_FEED_BYTES` | Maximum RSS feed fetch size in bytes. | `10485760` |
 | `MAX_DOWNLOAD_BYTES` | Maximum episode download size in bytes. | `1572864000` |
 | `MIN_FREE_SPACE_BYTES` | Minimum free disk space to preserve before/during downloads. | `1073741824` |

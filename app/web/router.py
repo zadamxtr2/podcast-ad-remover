@@ -5,13 +5,19 @@ from app.infra.repository import SubscriptionRepository, EpisodeRepository, Feed
 from app.core.feed import FeedManager
 from app.core.models import SubscriptionCreate
 from app.core.system_status import get_operation_status
+from app.core.url_utils import validate_http_url
 from app.web.auth import get_current_user, require_auth, require_admin, log_login_attempt, SESSION_USER_KEY
-from app.web.auth_utils import hash_password, verify_password, generate_secure_password, get_client_ip
+from app.web.auth_utils import hash_password, verify_feed_password, verify_password, generate_secure_password, get_client_ip
 from app.web.rate_limiter import login_rate_limiter, check_rate_limit
+from app.web.template_filters import clean_description as safe_clean_description
+from app.web.template_filters import simple_markdown as safe_simple_markdown
 from app.infra.database import get_db_connection
+from app.core.config import is_default_session_secret, settings as runtime_settings
 from datetime import datetime
 import os
 import logging
+import re
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -25,113 +31,33 @@ def get_csp_nonce(request: Request) -> str:
     return getattr(request.state, 'csp_nonce', '')
 
 
-# Add simple markdown filter
-def simple_markdown(text):
-    """Convert basic markdown to HTML: **bold**, bullets (*, -, •, 1.)"""
-    if not text:
-        return ""
-    import re
-    import html
-    # Handle both Unix and Windows line endings
-    lines = text.replace('\r\n', '\n').split('\n')
-    result = []
-    in_list = False
-    list_items = []
-    
-    def apply_bold(t):
-        import re
-        t = html.escape(t)
-        # Convert **text** to <strong>text</strong> (Bold)
-        t = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', t)
-        # Convert *text* to <strong>text</strong> (User requested single star bold)
-        t = re.sub(r'\*(.+?)\*', r'<strong>\1</strong>', t)
-        return t
-
-    def flush_list():
-        nonlocal in_list, list_items, result
-        if in_list and list_items:
-            # Inline styles as baseline, tailwind classes for styling
-            list_html = '<ul class="list-disc ml-8 space-y-2 mb-4 text-white/90" style="list-style-type: disc; margin-left: 2rem; margin-bottom: 1rem;">\n' + \
-                        '\n'.join(list_items) + '\n</ul>'
-            result.append(list_html)
-            list_items = []
-            in_list = False
-
-    for line in lines:
-        stripped_line = line.strip()
-        if not stripped_line:
-            if in_list:
-                flush_list()
-            continue
-            
-        # Match bullets: *, -, • or "1." followed by any whitespace (\s+)
-        bullet_match = re.match(r'^([\*\-\•]|\d+\.)\s+(.+)$', stripped_line)
-        
-        if bullet_match:
-            if not in_list:
-                in_list = True
-            content = bullet_match.group(2).strip()
-            # Apply bolding only to the content of the list item
-            content = apply_bold(content)
-            list_items.append(f'<li class="mb-1">{content}</li>')
-        else:
-            if in_list:
-                flush_list()
-            # Apply bolding to the paragraph text
-            processed_line = apply_bold(stripped_line)
-            result.append(f'<p class="mb-2 text-white/90 leading-relaxed">{processed_line}</p>')
-            
-    if in_list:
-        flush_list()
-        
-    return '\n'.join(result)
-
-def clean_description(text):
-    """Clean episode description: remove URLs, sponsors, promotional text, and HTML tags."""
-    if not text:
-        return ""
-    import re
-    import html
-    
-    # 0. Strip HTML tags first
-    text = re.sub(r'<[^>]+>', ' ', text)
-    
-    # 0.5. Decode HTML entities
-    text = html.unescape(text)
-    
-    # 1. Remove URLs
-    text = re.sub(r'https?://\S+|www\.\S+', '', text)
-    
-    # 2. Remove common promo codes/sponsor patterns
-    # (Simple heuristic: if line starts with 'Sponsor' or 'Promo', cut off rest or remove line)
-    # For now, let's just remove specific keywords/lines
-    lines = text.split('\n')
-    cleaned_lines = []
-    
-    cutoff_keywords = ["Sponsors:", "Support the show:", "Brought to you by:", "Advertise with us:", "See omnystudio.com/listener"]
-    
-    for line in lines:
-        stripped = line.strip()
-        # Check cutoff
-        if any(keyword in stripped for keyword in cutoff_keywords):
-           break # Stop processing description here (assuming footer junk follows)
-           
-        if stripped:
-            cleaned_lines.append(stripped)
-            
-    result = " ".join(cleaned_lines)
-    
-    # 3. Clean up extra whitespace
-    result = re.sub(r'\s+', ' ', result).strip()
-    
-    return result
-
-templates.env.filters['simple_markdown'] = simple_markdown
-templates.env.filters['clean_description'] = clean_description
+templates.env.filters['simple_markdown'] = safe_simple_markdown
+templates.env.filters['clean_description'] = safe_clean_description
 
 sub_repo = SubscriptionRepository()
 ep_repo = EpisodeRepository()
 feed_token_repo = FeedTokenRepository()
+
+
+def _append_feed_access_to_enclosures(xml_content: str, param_name: str, token_value: str) -> str:
+    """Append a feed access query parameter to enclosure URLs in RSS XML."""
+    encoded_value = quote(token_value, safe="")
+
+    def inject_auth(match):
+        url = match.group(2)
+        separator = "&amp;" if "?" in url else "?"
+        return f'{match.group(1)}{url}{separator}{param_name}={encoded_value}'
+
+    return re.sub(r'(enclosure\s+url=")(https?://[^"]+)', inject_auth, xml_content)
+
+
+def _safe_local_redirect(target: str | None, fallback: str) -> str:
+    """Allow redirects only to local app paths."""
+    if not target:
+        return fallback
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return fallback
+    return target
 
 # Helper to get settings
 def get_global_settings():
@@ -189,11 +115,23 @@ def get_setup_status(request: Request, global_settings: dict) -> dict:
     base_url = get_app_base_url(global_settings, request)
     feed_auth_enabled = str(global_settings.get("enable_feed_auth")).lower() in ("1", "true", "yes", "on")
     public_subscribe_enabled = str(global_settings.get("public_subscribe_page_enabled")).lower() in ("1", "true", "yes", "on")
+    auth_enabled = bool(global_settings.get("auth_enabled"))
+    security_warnings = []
+    if is_default_session_secret():
+        security_warnings.append(
+            "SESSION_SECRET_KEY is still using the default value. "
+            "Set a unique SESSION_SECRET_KEY before enabling dashboard or feed authentication."
+        )
+    if (auth_enabled or feed_auth_enabled) and base_url.lower().startswith("https://") and not runtime_settings.COOKIE_SECURE:
+        security_warnings.append(
+            "COOKIE_SECURE is false while authentication is enabled on an HTTPS base URL. "
+            "Set COOKIE_SECURE=true when users access this app through HTTPS."
+        )
 
     return {
         "admin_count": admin_count,
         "has_admin": admin_count > 0,
-        "auth_enabled": bool(global_settings.get("auth_enabled")),
+        "auth_enabled": auth_enabled,
         "base_url": base_url,
         "health_url": f"{base_url}/health",
         "subscribe_url": f"{base_url}/subscribe",
@@ -201,6 +139,7 @@ def get_setup_status(request: Request, global_settings: dict) -> dict:
         "subscription_count": subscription_count,
         "feed_auth_enabled": feed_auth_enabled,
         "public_subscribe_enabled": public_subscribe_enabled,
+        "security_warnings": security_warnings,
     }
 
 # --- Authentication Routes ---
@@ -208,7 +147,9 @@ def get_setup_status(request: Request, global_settings: dict) -> dict:
 async def login_page(request: Request):
     """Display login page or first-time setup."""
     with get_db_connection() as conn:
-        settings = conn.execute("SELECT auth_enabled, initial_password FROM app_settings WHERE id = 1").fetchone()
+        settings = conn.execute(
+            "SELECT auth_enabled, initial_password, public_subscribe_page_enabled FROM app_settings WHERE id = 1"
+        ).fetchone()
         user_count = conn.execute("SELECT COUNT(*) as count FROM users").fetchone()['count']
     
     # Check if this is first launch
@@ -221,7 +162,8 @@ async def login_page(request: Request):
             "csp_nonce": get_csp_nonce(request),
             "first_launch": first_launch,
             "initial_password": settings['initial_password'] if settings else None,
-            "auth_enabled": settings['auth_enabled'] if settings else False
+            "auth_enabled": settings['auth_enabled'] if settings else False,
+            "public_subscribe_page_enabled": settings['public_subscribe_page_enabled'] if settings else True,
         }
     )
 
@@ -230,6 +172,13 @@ async def login(request: Request, username: str = Form(...), password: str = For
     """Handle login submission with rate limiting protection."""
     client_ip = get_client_ip(request)
     user_agent = request.headers.get("user-agent", "")
+    public_subscribe_page_enabled = True
+    with get_db_connection() as conn:
+        settings_row = conn.execute(
+            "SELECT public_subscribe_page_enabled FROM app_settings WHERE id = 1"
+        ).fetchone()
+        if settings_row:
+            public_subscribe_page_enabled = bool(settings_row["public_subscribe_page_enabled"])
     
     # Check rate limit before processing login
     try:
@@ -244,7 +193,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
                 "error": e.detail,
                 "first_launch": False,
                 "auth_enabled": True,
-                "rate_limited": True
+                "rate_limited": True,
+                "public_subscribe_page_enabled": public_subscribe_page_enabled,
             },
             status_code=e.status_code
         )
@@ -269,7 +219,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
                 "error": error_msg,
                 "first_launch": False,
                 "auth_enabled": True,
-                "rate_limited": is_locked
+                "rate_limited": is_locked,
+                "public_subscribe_page_enabled": public_subscribe_page_enabled,
             }
         )
     
@@ -283,8 +234,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
         conn.commit()
     
     # Set session
+    request.session.pop("user_pass", None)
     request.session[SESSION_USER_KEY] = user_row['id']
-    request.session["user_pass"] = password
     
     return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
@@ -352,8 +303,7 @@ async def change_password(
         conn.execute("UPDATE app_settings SET require_password_change = 0, initial_password = NULL WHERE id = 1")
         conn.commit()
     
-    # Update session password
-    request.session["user_pass"] = new_password
+    request.session.pop("user_pass", None)
     
     return RedirectResponse(url="/admin/system?password_changed=1", status_code=status.HTTP_302_FOUND)
 
@@ -426,6 +376,12 @@ async def create_setup_admin_user(
     confirm_password: str = Form(...),
     user = Depends(require_admin)
 ):
+    if is_default_session_secret():
+        return RedirectResponse(
+            url="/admin/system?error=Set+SESSION_SECRET_KEY+before+enabling+login",
+            status_code=303,
+        )
+
     if password != confirm_password:
         return RedirectResponse(url="/admin/system?error=Passwords+do+not+match", status_code=303)
     if len(password) < 8:
@@ -469,28 +425,43 @@ async def update_system_settings(
     feed_auth_password: str = Form(None),
     public_subscribe_page_enabled: bool = Form(False),
     whitelist_mode: bool = Form(False),
-    redirect_to: str = Form(None)
+    redirect_to: str = Form(None),
+    admin_user = Depends(require_admin)
 ):
     from app.infra.database import get_db_connection
+
+    if (auth_enabled or enable_feed_auth) and is_default_session_secret():
+        url = _safe_local_redirect(redirect_to, "/admin/system")
+        separator = "&" if "?" in url else "?"
+        return RedirectResponse(
+            url=f"{url}{separator}error=Set+SESSION_SECRET_KEY+before+enabling+dashboard+or+feed+authentication",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     
     # Standalone feed password is retained for Basic Auth compatibility.
     # Generated podcast links now prefer feed tokens instead.
-    hashed_feed_password = feed_auth_password
+    hashed_feed_password = hash_password(feed_auth_password) if feed_auth_password else None
 
     with get_db_connection() as conn:
         # Get current settings
-        current_settings = conn.execute("SELECT auth_enabled, feed_auth_password FROM app_settings WHERE id = 1").fetchone()
+        current_settings = conn.execute(
+            "SELECT auth_enabled, feed_auth_username, feed_auth_password FROM app_settings WHERE id = 1"
+        ).fetchone()
         
         # Get current feed password if not changing
         if enable_feed_auth and not feed_auth_password:
             hashed_feed_password = current_settings['feed_auth_password'] if current_settings else None
+        effective_feed_username = feed_auth_username or (current_settings['feed_auth_username'] if current_settings else None)
 
-        # Backend Validation: If feed auth is enabled standalone, ensure we have credentials
+        # Backend validation: if feed auth is enabled without dashboard auth, standalone credentials are required.
         if enable_feed_auth and not auth_enabled:
-            # Check if we have username AND (new password OR existing password)
-            if not feed_auth_username or not (feed_auth_password or hashed_feed_password):
-                # Force disable feed auth if credentials missing
-                enable_feed_auth = False
+            if not effective_feed_username or not (feed_auth_password or hashed_feed_password):
+                url = _safe_local_redirect(redirect_to, "/admin/system")
+                separator = "&" if "?" in url else "?"
+                return RedirectResponse(
+                    url=f"{url}{separator}error=Standalone+feed+authentication+requires+a+username+and+password",
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
         
         # Check if auth is being enabled for the first time
         if auth_enabled and (not current_settings or not current_settings['auth_enabled']):
@@ -544,7 +515,7 @@ async def update_system_settings(
               app_external_url,
               1 if auth_enabled else 0, ip_allowlist,
               1 if enable_feed_auth else 0, 
-              feed_auth_username if feed_auth_username else None, 
+              effective_feed_username if enable_feed_auth else (feed_auth_username if feed_auth_username else None),
               hashed_feed_password if hashed_feed_password else None,
               1 if public_subscribe_page_enabled else 0,
               1 if whitelist_mode else 0))
@@ -570,7 +541,7 @@ async def update_system_settings(
         except Exception as e:
             logger.error(f"Failed to regenerate feeds after URL change: {e}")
     
-    url = redirect_to if redirect_to else "/admin/system?success=System+settings+updated"
+    url = _safe_local_redirect(redirect_to, "/admin/system?success=System+settings+updated")
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 # --- Admin: AI ---
@@ -614,7 +585,8 @@ async def update_ai_settings(
     gemini_api_keys: str = Form(None),
     openai_model: str = Form("gpt-4o"),
     anthropic_model: str = Form("claude-3-5-sonnet"),
-    openrouter_model: str = Form('["google/gemini-3.1-flash-lite", "google/gemini-3-flash-preview", "google/gemini-2.5-flash-lite"]')
+    openrouter_model: str = Form('["google/gemini-3.1-flash-lite", "google/gemini-3-flash-preview", "google/gemini-2.5-flash-lite"]'),
+    admin_user = Depends(require_admin)
 ):
     from app.infra.database import get_db_connection
     import json
@@ -662,7 +634,8 @@ async def update_ai_settings(
 async def test_ai_connection(
     provider: str = Form(...),
     api_key: str = Form(None),
-    model: str = Form(None)
+    model: str = Form(None),
+    admin_user = Depends(require_admin)
 ):
     try:
         from app.core.ai_services import AdDetector
@@ -682,7 +655,7 @@ async def test_ai_connection(
         }
 
 @router.get("/admin/ai/refresh/{provider}")
-async def refresh_models(provider: str):
+async def refresh_models(provider: str, admin_user = Depends(require_admin)):
     try:
         from app.core.ai_services import AdDetector
         detector = AdDetector()
@@ -726,11 +699,7 @@ Example: [{"start": 0.0, "end": 10.0, "label": "Ad", "reason": "Sponsor read for
     )
 
 @router.post("/admin/prompts")
-async def save_prompts(request: Request):
-    user = get_current_user(request)
-    if not user or not getattr(user, 'is_admin', False):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
+async def save_prompts(request: Request, admin_user = Depends(require_admin)):
     form = await request.form()
     
     # Required variables for validation
@@ -767,11 +736,7 @@ async def save_prompts(request: Request):
     return {"status": "success"}
 
 @router.post("/admin/prompts/reset")
-async def reset_prompts(request: Request):
-    user = get_current_user(request)
-    if not user or not getattr(user, 'is_admin', False):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
+async def reset_prompts(request: Request, admin_user = Depends(require_admin)):
     # Default prompts
     defaults = {
         'summary': """You are a smart assistant. Write a short 2-3 sentence summary of this podcast episode.
@@ -854,8 +819,16 @@ async def regenerate_feed_token(request: Request, user = Depends(require_admin))
     request.session["feed_token"] = new_token
     return RedirectResponse(url="/admin/access?success=Feed+token+regenerated", status_code=303)
 
+
+@router.post("/admin/feed-token/{token_id}/revoke")
+async def revoke_feed_token(token_id: int, admin_user = Depends(require_admin)):
+    revoked = feed_token_repo.revoke_by_id(token_id)
+    if not revoked:
+        return RedirectResponse(url="/admin/access?error=Feed+token+not+found", status_code=303)
+    return RedirectResponse(url="/admin/access?success=Feed+token+revoked", status_code=303)
+
 @router.post("/admin/queue/cancel/{episode_id}")
-async def cancel_episode(episode_id: int):
+async def cancel_episode(episode_id: int, admin_user = Depends(require_admin)):
     # Soft delete an episode (marks as ignored, cleans up files)
     from app.core.processor import Processor
     proc = Processor()
@@ -863,7 +836,7 @@ async def cancel_episode(episode_id: int):
     return RedirectResponse(url="/admin/queue", status_code=303)
 
 @router.post("/admin/queue/retry/{episode_id}")
-async def retry_episode(episode_id: int):
+async def retry_episode(episode_id: int, admin_user = Depends(require_admin)):
     # Check if already processing?
     status = ep_repo.get_status(episode_id)
     if status == 'processing':
@@ -877,7 +850,7 @@ async def retry_episode(episode_id: int):
     return RedirectResponse(url="/admin/queue", status_code=303)
 
 @router.post("/api/episodes/{episode_id}/reprocess")
-async def api_reprocess_episode(episode_id: int, skip_transcription: bool = False):
+async def api_reprocess_episode(episode_id: int, skip_transcription: bool = False, user = Depends(require_auth)):
     import json
     logger.info(f"Reprocess request for {episode_id} with skip_transcription={skip_transcription}")
     
@@ -899,7 +872,7 @@ async def api_reprocess_episode(episode_id: int, skip_transcription: bool = Fals
     return {"status": "ok"}
 
 @router.post("/api/episodes/{episode_id}/ignore")
-async def api_ignore_episode(episode_id: int):
+async def api_ignore_episode(episode_id: int, user = Depends(require_auth)):
     # API version of cancel/delete - soft delete
     from app.core.processor import Processor
     proc = Processor()
@@ -907,7 +880,7 @@ async def api_ignore_episode(episode_id: int):
     return {"status": "ok"}
 
 @router.post("/episodes/{episode_id}/download")
-async def manual_download_episode(episode_id: int, request: Request):
+async def manual_download_episode(episode_id: int, request: Request, user = Depends(require_auth)):
     # Update DB to pending
     from app.infra.database import get_db_connection
     with get_db_connection() as conn:
@@ -1026,6 +999,7 @@ async def admin_access(request: Request):
             "app_base_url": get_app_base_url(settings, request),
             "pending_requests": [dict(row) for row in pending_requests],
             "active_users": [dict(row) for row in active_users],
+            "active_feed_tokens": feed_token_repo.list_active(),
             "login_history": [dict(row) for row in login_history],
             "pending_requests_count": get_pending_requests_count(),
         }
@@ -1091,7 +1065,7 @@ async def delete_user(user_id: int, request: Request, user: dict = Depends(requi
 
 # --- Admin: Approve Access Request ---
 @router.post("/admin/access-requests/{request_id}/approve")
-async def approve_access_request(request: Request, request_id: int):
+async def approve_access_request(request: Request, request_id: int, admin_user = Depends(require_admin)):
     from app.infra.database import get_db_connection
     from app.web.auth_utils import hash_password, generate_secure_password
     
@@ -1142,7 +1116,7 @@ async def approve_access_request(request: Request, request_id: int):
 
 # --- Admin: Deny Access Request ---
 @router.post("/admin/access-requests/{request_id}/deny")
-async def deny_access_request(request: Request, request_id: int):
+async def deny_access_request(request: Request, request_id: int, admin_user = Depends(require_admin)):
     from app.infra.database import get_db_connection
     
     with get_db_connection() as conn:
@@ -1167,8 +1141,12 @@ async def deny_access_request(request: Request, request_id: int):
 
 # --- Admin: Update User Username ---
 @router.post("/admin/users/{user_id}/username")
-async def update_user_username(request: Request, user_id: int, username: str = Form(...)):
-    require_admin(request)
+async def update_user_username(
+    request: Request,
+    user_id: int,
+    username: str = Form(...),
+    admin_user = Depends(require_admin),
+):
     with get_db_connection() as conn:
         # Check if username already exists
         existing = conn.execute("SELECT id FROM users WHERE username = ? AND id != ?", (username, user_id)).fetchone()
@@ -1181,8 +1159,12 @@ async def update_user_username(request: Request, user_id: int, username: str = F
 
 # --- Admin: Update Request Username ---
 @router.post("/admin/access-requests/{request_id}/username")
-async def update_request_username(request: Request, request_id: int, username: str = Form(...)):
-    require_admin(request)
+async def update_request_username(
+    request: Request,
+    request_id: int,
+    username: str = Form(...),
+    admin_user = Depends(require_admin),
+):
     with get_db_connection() as conn:
         conn.execute("UPDATE access_requests SET username = ? WHERE id = ?", (username, request_id))
         conn.commit()
@@ -1449,7 +1431,8 @@ async def update_global_subscription_settings(
     default_retention_limit: int = Form(1),
     default_retention_days: int = Form(30),
     default_manual_retention_days: int = Form(14),
-    default_custom_instructions: str = Form(None)
+    default_custom_instructions: str = Form(None),
+    admin_user = Depends(require_admin)
 ):
     with get_db_connection() as conn:
         conn.execute("""
@@ -1478,8 +1461,16 @@ async def update_global_subscription_settings(
 
 
 @router.post("/add", response_class=HTMLResponse)
-async def add_subscription(request: Request, background_tasks: BackgroundTasks, feed_url: str = Form(...), initial_count: int = Form(1)):
+async def add_subscription(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    feed_url: str = Form(...),
+    initial_count: int = Form(1),
+    user = Depends(require_auth),
+):
     try:
+        validate_http_url(feed_url, allow_private=runtime_settings.ALLOW_PRIVATE_FEEDS)
+
         # Check if exists (quick DB check)
         existing = sub_repo.get_by_url(feed_url)
         if existing:
@@ -1599,7 +1590,8 @@ async def view_subscription(request: Request, id: int):
             "total_listens": total_listens,
             "total_episodes": total_episodes,
             "has_more": has_more,
-            "page_size": INITIAL_PAGE_SIZE
+            "page_size": INITIAL_PAGE_SIZE,
+            "settings": global_settings
         }
     )
 
@@ -1648,7 +1640,8 @@ async def update_settings(
     ai_audio_summary: bool = Form(False),
     retention_days: int = Form(30),
     manual_retention_days: int = Form(14),
-    retention_limit: int = Form(1)
+    retention_limit: int = Form(1),
+    user = Depends(require_auth),
 ):
     sub_repo.update_settings(
         id, 
@@ -1813,7 +1806,6 @@ async def get_individual_feed(slug: str, request: Request):
     from app.core.config import settings as app_settings
     from fastapi.responses import FileResponse, Response
     import base64
-    import re
     
     sub_repo = SubscriptionRepository()
     sub = sub_repo.get_by_slug(slug)
@@ -1877,12 +1869,7 @@ async def get_individual_feed(slug: str, request: Request):
             else:
                 param_name = "token"
             
-            def inject_auth(match):
-                url = match.group(2)
-                separator = "&" if "?" in url else "?"
-                return f'{match.group(1)}{url}{separator}{param_name}={audio_token}'
-
-            xml_content = re.sub(r'(enclosure\s+url=")(https?://[^"]+)', inject_auth, xml_content)
+            xml_content = _append_feed_access_to_enclosures(xml_content, param_name, audio_token)
             
             return Response(content=xml_content, media_type="application/xml", headers=cache_headers)
         except Exception as e:
@@ -1937,7 +1924,7 @@ async def get_unified_feed(request: Request):
                     # Validate against standalone settings
                     expected_user = settings.get('feed_auth_username')
                     expected_pass = settings.get('feed_auth_password')
-                    if username == expected_user and password == expected_pass:
+                    if username == expected_user and verify_feed_password(password, expected_pass):
                         authorized = True
             except Exception:
                 pass
@@ -1971,21 +1958,14 @@ async def get_unified_feed(request: Request):
             
             # Inject feed access into enclosure URLs so podcast clients can download audio.
             if audio_token or (username and password):
-                import re
                 if audio_token:
                     token_param = "token"
                     token_value = audio_token
                 else:
                     token_param = "auth"
                     token_value = base64.b64encode(f"{username}:{password}".encode()).decode()
-                
-                def inject_auth(match):
-                    url = match.group(2)
-                    separator = "&" if "?" in url else "?"
-                    return f'{match.group(1)}{url}{separator}{token_param}={token_value}'
 
-                # Find enclosure url="...", capture the prefix and the URL
-                xml_content = re.sub(r'(enclosure\s+url=")(https?://[^"]+)', inject_auth, xml_content)
+                xml_content = _append_feed_access_to_enclosures(xml_content, token_param, token_value)
 
                 
             return Response(content=xml_content, media_type="application/xml", headers=cache_headers)

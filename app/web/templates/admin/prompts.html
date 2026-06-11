@@ -62,8 +62,12 @@
 
     function showAlert(message, type = 'error') {
         const alertClass = type === 'success' ? 'alert-success' : 'alert-error';
-        alertContainer.innerHTML = `<div class="${alertClass} mb-4">${message}</div>`;
-        setTimeout(() => alertContainer.innerHTML = '', 5000);
+        alertContainer.replaceChildren();
+        const alert = document.createElement('div');
+        alert.className = `${alertClass} mb-4`;
+        alert.textContent = message;
+        alertContainer.appendChild(alert);
+        setTimeout(() => alertContainer.replaceChildren(), 5000);
     }
 
     function validatePrompts(formData) {

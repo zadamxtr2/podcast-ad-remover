@@ -96,23 +96,17 @@ The audit branch adds optional controls for `whisper_cpu_threads` and `ffmpeg_th
 ## Recommended Next Steps
 
 1. Measure Whisper reload time on the live container after enabling `Unload Whisper After Jobs`.
-2. Add UI visibility for `/data` storage by category:
-   - processed audio
-   - transcripts/reports
-   - feeds
-   - models
-   - backups
-3. Add optional image variants only if image size becomes a real operational problem:
+2. Add optional image variants only if image size becomes a real operational problem:
    - `standard`: current full transcription plus Piper support.
    - `no-tts`: remove Piper and ONNX Runtime for users who do not use audio summaries or title intros.
    - potentially `external-transcription`: for users who do not want local Whisper.
-4. Add UI controls for existing download guardrails:
+3. Add UI controls for existing download guardrails:
    - minimum free disk space
    - maximum episode download size
-5. Make cleanup safer and more visible:
+4. Make cleanup safer and more visible:
    - show retained episode count per podcast
    - show estimated disk reclaimed before deleting files
-   - expose stale `.work` cleanup after staged processing is introduced
+   - expand stale artifact cleanup if future staged processing introduces `.work` directories
 
 ## Commands For A Real Container Audit
 

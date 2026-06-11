@@ -25,11 +25,22 @@ Run:
 npm run verify
 ```
 
+`npm test` runs the same standard verification gate.
+
 This currently performs:
 
 - Python syntax compilation for `app/` and `scripts/`.
 - Python unit tests with `pytest`.
 - Tailwind CSS rebuild from `app/web/static/css/input.css` to `app/web/static/css/output.css`.
+- Frontend dependency audit with `npm audit --audit-level=moderate`.
+
+If Tailwind reports stale Browserslist data, refresh the lockfile metadata with:
+
+```bash
+npx update-browserslist-db@latest
+```
+
+This is a maintenance update only; confirm the resulting `package-lock.json` changes are limited to Browserslist-related dependency metadata.
 
 ## Docker Check
 
@@ -40,6 +51,26 @@ npm run verify:docker
 ```
 
 This runs the standard check and builds a local image tagged `podcast-ad-remover:verify`.
+
+## Migration Dry Run
+
+Before upgrading a valuable existing install, validate migrations against a copy of the database:
+
+```bash
+npm run db:migration-dry-run -- --db-path /data/db/podcasts.db
+```
+
+To keep the migrated copy for inspection:
+
+```bash
+npm run db:migration-dry-run -- --db-path /data/db/podcasts.db --keep-copy /tmp/podcast-ad-remover-migration-check
+```
+
+The helper copies the source database into a temporary data directory, runs the normal startup migration path on the copy, and does not modify the source database.
+
+## Pull Request Check
+
+GitHub Actions runs `npm run verify` on pull requests and pushes to `main` and `audit-work`. The workflow sets `DATA_DIR` to a temporary runner directory so tests do not depend on `/data` being writable.
 
 ## Release Publish Check
 
@@ -79,5 +110,4 @@ The helper refuses `latest` and SemVer-looking tags.
 ## Current Gaps
 
 - Python test coverage is intentionally small and should be expanded before broad processor refactors.
-- `npm audit --audit-level=moderate` is useful, but it is not part of the default gate until the current dependency advisories are resolved.
 - There is no automated migration test against a realistic copy of an existing `podcasts.db`; add this before making destructive or rename-style schema changes.

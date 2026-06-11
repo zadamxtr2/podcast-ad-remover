@@ -164,6 +164,36 @@ class EpisodeRepository:
             rows = conn.execute("SELECT * FROM episodes WHERE subscription_id = ?", (subscription_id,)).fetchall()
             return [Episode.model_validate(dict(row)) for row in rows]
 
+    def get_completed_by_subscription(self, subscription_id: int) -> List[dict]:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM episodes
+                WHERE subscription_id = ?
+                  AND status = 'completed'
+                ORDER BY pub_date DESC
+                """,
+                (subscription_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_completed_with_subscription_info(self) -> List[dict]:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.*,
+                       s.title AS podcast_title,
+                       s.slug AS podcast_slug,
+                       s.image_url AS podcast_image
+                FROM episodes e
+                JOIN subscriptions s ON e.subscription_id = s.id
+                WHERE e.status = 'completed'
+                ORDER BY e.pub_date DESC
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_by_subscription_paginated(self, subscription_id: int, limit: int = 20, offset: int = 0, search: str = None) -> list:
         """Get episodes for a subscription with pagination, ordered by pub_date descending.
         Optionally filter by search term (matches title)."""
@@ -461,6 +491,8 @@ def _schedule_retry_job(
 class JobRepository:
     """SQLite-backed processing jobs with transaction-based claiming."""
 
+    DEFAULT_STALE_AFTER_MINUTES = 24 * 60
+
     def enqueue(self, episode_id: int, job_type: str = "process_episode", priority: int = 100):
         with get_db_connection() as conn:
             job_id = _enqueue_job(conn, episode_id, job_type, priority)
@@ -531,6 +563,55 @@ class JobRepository:
 
             conn.commit()
             return [dict(row) for row in rows]
+
+    def recover_stale_running(self, max_age_minutes: int | None = None) -> int:
+        """Return stale running jobs to the queue after a worker crash or restart."""
+        max_age_minutes = max_age_minutes or self.DEFAULT_STALE_AFTER_MINUTES
+        stale_modifier = f"-{int(max_age_minutes)} minutes"
+
+        with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute("""
+                SELECT j.id AS job_id, j.episode_id
+                FROM jobs j
+                JOIN episodes e ON e.id = j.episode_id
+                WHERE j.type = 'process_episode'
+                  AND j.status = 'running'
+                  AND e.status = 'processing'
+                  AND (
+                    j.locked_at IS NULL
+                    OR j.locked_at <= datetime(CURRENT_TIMESTAMP, ?)
+                  )
+            """, (stale_modifier,)).fetchall()
+
+            if not rows:
+                conn.commit()
+                return 0
+
+            job_ids = [row["job_id"] for row in rows]
+            episode_ids = [row["episode_id"] for row in rows]
+
+            conn.executemany("""
+                UPDATE jobs
+                SET status = 'queued',
+                    locked_at = NULL,
+                    locked_by = NULL,
+                    next_run_at = CURRENT_TIMESTAMP,
+                    error = 'Recovered stale running job after worker interruption',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, [(job_id,) for job_id in job_ids])
+
+            conn.executemany("""
+                UPDATE episodes
+                SET status = 'pending',
+                    processing_step = 'retry scheduled after worker interruption',
+                    progress = 0
+                WHERE id = ?
+            """, [(episode_id,) for episode_id in episode_ids])
+
+            conn.commit()
+            return len(rows)
 
     def complete_for_episode(self, episode_id: int, conn: sqlite3.Connection | None = None):
         if conn is None:
@@ -607,6 +688,22 @@ class FeedTokenRepository:
             conn.commit()
         return token
 
+    def list_active(self) -> list[dict]:
+        with get_db_connection() as conn:
+            rows = conn.execute("""
+                SELECT ft.id,
+                       ft.user_id,
+                       ft.name,
+                       ft.created_at,
+                       ft.last_used_at,
+                       u.username
+                FROM feed_tokens ft
+                LEFT JOIN users u ON u.id = ft.user_id
+                WHERE ft.revoked_at IS NULL
+                ORDER BY ft.created_at DESC
+            """).fetchall()
+            return [dict(row) for row in rows]
+
     def validate(self, token: str | None) -> bool:
         if not token:
             return False
@@ -636,3 +733,13 @@ class FeedTokenRepository:
                 WHERE token_hash = ? AND revoked_at IS NULL
             """, (token_hash,))
             conn.commit()
+
+    def revoke_by_id(self, token_id: int) -> bool:
+        with get_db_connection() as conn:
+            result = conn.execute("""
+                UPDATE feed_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND revoked_at IS NULL
+            """, (token_id,))
+            conn.commit()
+            return result.rowcount > 0

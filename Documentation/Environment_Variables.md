@@ -31,11 +31,11 @@ Current Gemini free-tier limits recorded for these defaults:
 
 | Model | Category | RPM | TPM | RPD |
 |-------|----------|-----|-----|-----|
-| Gemini 2.5 Flash | Text-out models | 3 / 5 | 50.11K / 250K | 9 / 20 |
-| Gemini 3 Flash | Text-out models | 2 / 5 | 41.07K / 250K | 9 / 20 |
-| Gemini 2.5 Flash Lite | Text-out models | 1 / 10 | 61.8K / 250K | 6 / 20 |
-| Gemini 3.1 Flash Lite | Text-out models | 1 / 15 | 68.66K / 250K | 5 / 500 |
-| Gemini 3.5 Flash | Text-out models | 0 / 5 | 0 / 250K | 0 / 20 |
+| Gemini 2.5 Flash | Text-out models | 5 | 250K | 20 |
+| Gemini 3 Flash | Text-out models | 5 | 250K | 20 |
+| Gemini 2.5 Flash Lite | Text-out models | 10 | 250K | 20 |
+| Gemini 3.1 Flash Lite | Text-out models | 15 | 250K | 500 |
+| Gemini 3.5 Flash | Text-out models | 5 | 250K | 20 |
 
 ## Optional / Defaults
 

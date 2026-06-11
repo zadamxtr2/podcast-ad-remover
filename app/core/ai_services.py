@@ -4,11 +4,18 @@ import asyncio
 import os
 import sys
 import gc
+import importlib.util
 from typing import List, Dict
 from app.core.config import settings
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def piper_tts_available() -> bool:
+    if os.getenv("TTS_ENABLED", "1").lower() in {"0", "false", "no", "off"}:
+        return False
+    return importlib.util.find_spec("piper") is not None
 
 
 class RateLimitError(Exception):
@@ -866,6 +873,9 @@ Example: [{"start": 10.0, "end": 300.0, "label": "Content", "reason": "Main disc
         """
         Check if TTS service is available and model is ready.
         """
+        if not piper_tts_available():
+            raise RuntimeError("Piper TTS is not installed or is disabled in this image.")
+
         try:
              # Fetch configured voice model
             piper_model_file = "en_GB-cori-high.onnx"
@@ -909,6 +919,9 @@ Example: [{"start": 10.0, "end": 300.0, "label": "Content", "reason": "Main disc
         Generate TTS audio using local system TTS (offline).
         Uses app/core/tts_worker.py in a separate process to avoid stability issues.
         """
+        if not piper_tts_available():
+            raise RuntimeError("Piper TTS is not installed or is disabled in this image.")
+
         try:
             logger.info("Generating TTS (Piper in subprocess)...")
 

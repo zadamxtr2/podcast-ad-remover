@@ -73,6 +73,14 @@ For a local image without Compose:
 docker build -t podcast-ad-remover:local .
 ```
 
+The default image includes Piper TTS and is intended primarily for `linux/amd64`. Experimental Apple Silicon / ARM64 builds can skip Piper TTS:
+
+```bash
+npm run docker:experimental:arm64 -- --push
+```
+
+This path targets `linux/arm64`, tags the image as `jdcb4/podcast-ad-remover:experimental-arm64`, and sets `INSTALL_TTS=0`. Spoken summaries and title intros are unavailable in that image; podcast download, transcription, ad detection, cutting, feed generation, and the web UI remain the intended test surface.
+
 ## Release Publishing
 
 Before upgrading an existing install with important data, dry-run database migrations against a copy:

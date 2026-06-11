@@ -29,3 +29,7 @@ The current app has oversized modules and templates, but the core architecture s
 ## 2026-06-11: Prefer Gemini Flash/Lite fallback models for default ad detection
 
 Gemini remains the recommended provider for most homelab installs because the free tier is usually enough for this app's transcript-analysis workload. The default cascade now follows the current Flash/Lite fallback order: Gemini 3.5 Flash, Gemini 3 Flash, Gemini 3.1 Flash Lite, Gemini 2.5 Flash, then Gemini 2.5 Flash Lite. OpenRouter uses the same order with `google/` model IDs.
+
+## 2026-06-12: Keep amd64 primary and make ARM64 experimental without Piper TTS
+
+The default Docker image remains `linux/amd64` with Piper TTS installed. Apple Silicon / ARM64 is useful to test, but Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels. The experimental ARM64 build uses `INSTALL_TTS=0` so the core podcast workflow can be tested without reworking the app around TTS.

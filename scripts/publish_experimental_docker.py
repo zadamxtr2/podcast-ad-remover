@@ -72,6 +72,8 @@ def main() -> int:
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY, help="Docker image repository.")
     parser.add_argument("--platform", default="linux/amd64", help="Docker build platform.")
     parser.add_argument("--tag", action="append", dest="tags", help="Non-release tag to build. Repeatable.")
+    parser.add_argument("--build-arg", action="append", default=[], help="Docker build argument. Repeatable.")
+    parser.add_argument("--no-tts", action="store_true", help="Skip Piper TTS dependencies for images where Piper is unavailable.")
     args = parser.parse_args()
 
     tags = validate_tags(args.tags or default_tags())
@@ -87,6 +89,11 @@ def main() -> int:
         "--platform",
         args.platform,
     ]
+    build_args = list(args.build_arg)
+    if args.no_tts:
+        build_args.append("INSTALL_TTS=0")
+    for build_arg in build_args:
+        command.extend(["--build-arg", build_arg])
     for full_tag in full_tags:
         command.extend(["-t", full_tag])
     command.append("--push" if args.push else "--load")

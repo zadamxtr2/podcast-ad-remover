@@ -1,4 +1,4 @@
-from app.core.ai_services import AdDetector, OpenAIProvider
+from app.core.ai_services import AdDetector, OpenAIProvider, piper_tts_available
 
 
 def test_gemini_uses_openai_compatible_provider_with_multiple_keys():
@@ -34,3 +34,9 @@ def test_openrouter_keeps_openai_compatible_provider_without_model_filter():
     assert provider.provider_name == "OpenRouter"
     assert provider.base_url == "https://openrouter.ai/api/v1"
     assert provider.model_prefixes is None
+
+
+def test_tts_can_be_disabled_by_image_environment(monkeypatch):
+    monkeypatch.setenv("TTS_ENABLED", "0")
+
+    assert piper_tts_available() is False

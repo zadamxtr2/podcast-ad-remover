@@ -157,6 +157,14 @@ Experimental branch images can be published without touching `latest`:
 npm run docker:experimental -- --push --tag experimental
 ```
 
+Experimental Apple Silicon / ARM64 images can be built without Piper TTS:
+
+```bash
+npm run docker:experimental:arm64 -- --push
+```
+
+`linux/amd64` remains the primary release target. The ARM64 experimental image skips Piper because its phonemizer dependency is not currently available as a simple Linux arm64 wheel. Podcast download, local transcription, ad detection, cutting, feeds, and the web UI remain the target feature set; spoken summaries and title intros require a TTS-enabled image.
+
 Release publishing is explicit and tags both the version and `latest`:
 
 ```bash

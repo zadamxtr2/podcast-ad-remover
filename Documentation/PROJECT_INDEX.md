@@ -31,6 +31,7 @@ npm run verify
 npm run verify:docker
 npm run docker:build
 npm run docker:publish
+npm run docker:experimental:arm64
 docker compose up -d --build
 ```
 

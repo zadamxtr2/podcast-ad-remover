@@ -99,6 +99,7 @@ The audit branch adds optional controls for `whisper_cpu_threads` and `ffmpeg_th
 2. Add optional image variants only if image size becomes a real operational problem:
    - `standard`: current full transcription plus Piper support.
    - `no-tts`: remove Piper and ONNX Runtime for users who do not use audio summaries or title intros.
+   - `experimental-arm64`: Apple Silicon / ARM64 test image using `INSTALL_TTS=0` because Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels.
    - potentially `external-transcription`: for users who do not want local Whisper.
 3. Add UI controls for existing download guardrails:
    - minimum free disk space

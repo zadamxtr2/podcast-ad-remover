@@ -107,6 +107,16 @@ By default this publishes:
 
 The helper refuses `latest` and SemVer-looking tags.
 
+## Experimental ARM64 Docker Tag
+
+`linux/amd64` remains the primary release target. For Apple Silicon / ARM64 trial builds, use the no-TTS experimental helper:
+
+```bash
+npm run docker:experimental:arm64 -- --push
+```
+
+This publishes `jdcb4/podcast-ad-remover:experimental-arm64` when pushed. It passes `INSTALL_TTS=0`, so Piper TTS is not installed. Spoken summaries and title intros require a TTS-enabled image; the ARM64 experimental target is intended to test the core podcast download, transcription, ad detection, cutting, feed, and web UI path.
+
 ## Current Gaps
 
 - Python test coverage is intentionally small and should be expanded before broad processor refactors.

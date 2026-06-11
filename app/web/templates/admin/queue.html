@@ -122,7 +122,7 @@
                 {% if item.status == 'processing' %}
                 <form action="/admin/queue/cancel/{{ item.id }}" method="post" class="inline">
                     <button type="submit" class="text-red-400 hover:text-red-300 font-medium text-sm"
-                        onclick="return confirm('Cancel processing?')">Cancel</button>
+                        onclick="return appConfirmSubmit(this.form, 'Cancel processing?', { danger: true })">Cancel</button>
                 </form>
                 {% else %}
                 <form action="/admin/queue/retry/{{ item.id }}" method="post" class="inline">

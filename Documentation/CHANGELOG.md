@@ -5,6 +5,7 @@
 - Updated agent-maintenance guidance to list relevant root and `Documentation/` guidance files, require documentation updates alongside changes, and prefer commits after significant verified changes.
 - Updated the default Gemini and OpenRouter Gemini fallback cascades to the current Flash/Lite order.
 - Documented current Gemini free-tier RPM, TPM, and RPD limits in the README and environment documentation.
+- Added a shared in-app toast and confirmation dialog system and replaced browser-native alert, confirm, and prompt popups in the web UI.
 - Added a toggleable public read-only subscription page at `/subscribe`.
 - Added backup-aware formal migration scaffolding and a durable SQLite jobs table.
 - Added a migration dry-run helper for validating startup migrations against a copied `podcasts.db`.

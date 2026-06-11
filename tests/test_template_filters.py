@@ -75,6 +75,20 @@ def test_admin_logs_template_escapes_lines_before_highlighting():
 def test_admin_prompts_alerts_use_text_content():
     template_source = Path("app/web/templates/admin/prompts.html").read_text(encoding="utf-8")
 
-    assert "alert.textContent = message" in template_source
-    assert "alertContainer.replaceChildren()" in template_source
+    assert "appToast(message, { type })" in template_source
     assert "alertContainer.innerHTML = `<div" not in template_source
+
+
+def test_templates_use_app_notifications_instead_of_browser_popups():
+    template_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("app/web/templates").rglob("*.html")
+    )
+
+    assert "function (message, options = {})" in template_sources
+    assert "window.appToast" in template_sources
+    assert "window.appConfirm" in template_sources
+    assert "window.appPrompt" in template_sources
+    assert "alert(" not in template_sources
+    assert "confirm(" not in template_sources
+    assert "prompt(" not in template_sources

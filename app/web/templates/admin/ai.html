@@ -264,7 +264,10 @@
 
         add(provider, model) {
             const state = this.states[provider];
-            if (state.selected.length >= 10) { alert("Max 10 models."); return; }
+            if (state.selected.length >= 10) {
+                appToast("Max 10 models.", { type: 'warning' });
+                return;
+            }
             state.selected.push(model);
             this.sync(provider);
         }
@@ -301,18 +304,19 @@
                     const state = this.states[provider];
                     data.models.forEach(m => { if (!state.allKnown.includes(m)) state.allKnown.push(m); });
                     this.sync(provider);
-                    alert(`Refreshed ${provider}. Found ${data.models.length} models.`);
-                } else { alert('Error: ' + data.error); }
-            } catch (e) { alert(e); }
+                    appToast(`Refreshed ${provider}. Found ${data.models.length} models.`, { type: 'success' });
+                } else { appToast('Error: ' + data.error, { type: 'error' }); }
+            } catch (e) { appToast(String(e), { type: 'error' }); }
         }
 
-        reset(provider) {
+        async reset(provider) {
             const defs = DEFAULTS[provider];
             if (defs) {
-                if (!confirm(`Reset ${provider} model list to system defaults?\n\nDefaults: ${defs.join(', ')}`)) return;
+                if (!await appConfirm(`Reset ${provider} model list to system defaults?\n\nDefaults: ${defs.join(', ')}`)) return;
                 this.states[provider].selected = [...defs];
                 defs.forEach(m => { if (!this.states[provider].allKnown.includes(m)) this.states[provider].allKnown.push(m); });
                 this.sync(provider);
+                appToast(`Reset ${provider} model list.`, { type: 'success' });
             }
         }
     }

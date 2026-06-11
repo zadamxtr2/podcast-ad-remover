@@ -1199,7 +1199,7 @@
         const ids = Array.from(document.querySelectorAll('.episode-checkbox:checked')).map(cb => cb.value);
         if (ids.length === 0) return;
 
-        if (!confirm(`Reprocess ${ids.length} episode(s)?`)) return;
+        if (!await appConfirm(`Reprocess ${ids.length} episode(s)?`)) return;
 
         for (const id of ids) {
             try {
@@ -1216,7 +1216,7 @@
         const ids = Array.from(document.querySelectorAll('.episode-checkbox:checked')).map(cb => cb.value);
         if (ids.length === 0) return;
 
-        if (!confirm(`Delete ${ids.length} episode(s)? This will mark them as ignored.`)) return;
+        if (!await appConfirm(`Delete ${ids.length} episode(s)? This will mark them as ignored.`, { danger: true })) return;
 
         for (const id of ids) {
             try {
@@ -1339,24 +1339,24 @@
     });
 
     async function deleteEpisode(id) {
-        if (!confirm('Ignore this episode and remove its local files? The episode record stays ignored so it is not downloaded again automatically.')) return;
+        if (!await appConfirm('Ignore this episode and remove its local files? The episode record stays ignored so it is not downloaded again automatically.', { danger: true })) return;
         const btn = document.getElementById(`btn-delete-${id}`);
         const originalText = btn.innerHTML;
         btn.disabled = true; btn.innerHTML = 'Deleting...';
         try {
             const response = await fetch(`/api/episodes/${id}`, { method: 'DELETE' });
             if (response.ok) window.location.reload();
-            else { alert('Failed to delete episode.'); btn.disabled = false; btn.innerHTML = originalText; }
-        } catch (e) { alert('Error deleting episode.'); btn.disabled = false; btn.innerHTML = originalText; }
+            else { appToast('Failed to delete episode.', { type: 'error' }); btn.disabled = false; btn.innerHTML = originalText; }
+        } catch (e) { appToast('Error deleting episode.', { type: 'error' }); btn.disabled = false; btn.innerHTML = originalText; }
     }
 
     async function downloadEpisode(id) {
-        if (!confirm('Download this episode manually and queue it for processing?')) return;
+        if (!await appConfirm('Download this episode manually and queue it for processing?')) return;
         try {
             const resp = await fetch(`/episodes/${id}/download`, { method: 'POST' });
-            if (resp.ok) { alert('Download queued!'); location.reload(); }
-            else alert('Failed to queue download.');
-        } catch (e) { alert('Error starting download.'); }
+            if (resp.ok) { appToast('Download queued.', { type: 'success' }); setTimeout(() => location.reload(), 700); }
+            else appToast('Failed to queue download.', { type: 'error' });
+        } catch (e) { appToast('Error starting download.', { type: 'error' }); }
     }
 
     function showActionSheet(e, episodeId, hasTranscript, hasReport) {
@@ -1408,27 +1408,29 @@
     }
 
     async function checkNow(id) {
-        if (!confirm('Check for new episodes now?')) return;
+        if (!await appConfirm('Check for new episodes now?')) return;
         await fetch(`/api/subscriptions/${id}/check`, { method: 'POST' });
-        alert('Check triggered!'); location.reload();
+        appToast('Feed check triggered.', { type: 'success' });
+        setTimeout(() => location.reload(), 700);
     }
 
     async function processEpisode(id, skipTranscription) {
         const action = skipTranscription ? "Reprocess (Keep Transcript)" : "Full Reprocess";
-        if (!confirm(`${action}: this will queue the episode again using the current processing settings. Continue?`)) return;
+        if (!await appConfirm(`${action}: this will queue the episode again using the current processing settings. Continue?`)) return;
         const url = `/api/episodes/${id}/reprocess` + (skipTranscription ? "?skip_transcription=true" : "");
         try {
             const response = await fetch(url, { method: 'POST' });
             if (response.ok) {
+                appToast('Processing queued. The page will refresh shortly.', { type: 'success', timeout: 7000 });
                 // Wait 20 seconds for system to queue the episode before refreshing
                 setTimeout(() => location.reload(), 20000);
             }
-            else alert(`Failed to trigger processing: ${response.status}`);
-        } catch (e) { alert('Error starting processing.'); }
+            else appToast(`Failed to trigger processing: ${response.status}`, { type: 'error' });
+        } catch (e) { appToast('Error starting processing.', { type: 'error' }); }
     }
 
     async function cancelEpisode(id) {
-        if (!confirm('Cancel processing and ignore this episode? Local files for this episode will be removed.')) return;
+        if (!await appConfirm('Cancel processing and ignore this episode? Local files for this episode will be removed.', { danger: true })) return;
         await fetch(`/api/episodes/${id}/cancel`, { method: 'POST' });
         location.reload();
     }
@@ -1442,10 +1444,10 @@
     }
 
     async function deleteSubscription(id) {
-        if (!confirm('Delete this subscription and all local files for its episodes? This removes the subscription from the app.')) return;
+        if (!await appConfirm('Delete this subscription and all local files for its episodes? This removes the subscription from the app.', { danger: true })) return;
         const res = await fetch(`/api/subscriptions/${id}`, { method: 'DELETE' });
         if (res.ok) window.location.href = '/';
-        else alert('Failed to delete subscription');
+        else appToast('Failed to delete subscription.', { type: 'error' });
     }
 
     {% if has_processing.value %}

@@ -25,3 +25,7 @@ The target deployment is a personal Docker install with existing SQLite data und
 ## 2026-06-11: Improve the current FastAPI/Jinja app incrementally before considering a rebuild
 
 The current app has oversized modules and templates, but the core architecture still matches the deployment model. The audit branch should reduce risk through tests, auth hardening, resource controls, and focused refactors before considering a full frontend or backend rebuild.
+
+## 2026-06-11: Prefer Gemini Flash/Lite fallback models for default ad detection
+
+Gemini remains the recommended provider for most homelab installs because the free tier is usually enough for this app's transcript-analysis workload. The default cascade now follows the current Flash/Lite fallback order: Gemini 3.5 Flash, Gemini 3 Flash, Gemini 3.1 Flash Lite, Gemini 2.5 Flash, then Gemini 2.5 Flash Lite. OpenRouter uses the same order with `google/` model IDs.

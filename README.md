@@ -71,6 +71,28 @@ This application recommends using Google Gemini (Flash model) as it is currently
 5.  Copy the generated key (starts with `AIza...`).
 6.  Paste this key into the application settings.
 
+### Default Gemini Fallback
+
+The default Gemini model cascade is ordered for the current free-tier Flash/Lite models:
+
+1. `gemini-3.5-flash`
+2. `gemini-3-flash`
+3. `gemini-3.1-flash-lite`
+4. `gemini-2.5-flash`
+5. `gemini-2.5-flash-lite`
+
+The app tries each model in order and falls back when a model is unavailable, fails, or hits a rate limit. The current free-tier limits used for this default are:
+
+| Model | Category | RPM | TPM | RPD |
+|-------|----------|-----|-----|-----|
+| Gemini 2.5 Flash | Text-out models | 3 / 5 | 50.11K / 250K | 9 / 20 |
+| Gemini 3 Flash | Text-out models | 2 / 5 | 41.07K / 250K | 9 / 20 |
+| Gemini 2.5 Flash Lite | Text-out models | 1 / 10 | 61.8K / 250K | 6 / 20 |
+| Gemini 3.1 Flash Lite | Text-out models | 1 / 15 | 68.66K / 250K | 5 / 500 |
+| Gemini 3.5 Flash | Text-out models | 0 / 5 | 0 / 250K | 0 / 20 |
+
+If the first model is not available on your account or quota tier, the cascade should move on to the next configured model automatically.
+
 ### Unraid
 
 A dedicated Unraid template is included (`podcast-ad-remover.xml`). Add the template to your Docker templates URL or copy it to your flash drive. See [Documentation/Unraid_Deployment.md](Documentation/Unraid_Deployment.md) for details.

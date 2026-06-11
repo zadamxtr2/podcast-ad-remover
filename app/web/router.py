@@ -585,7 +585,7 @@ async def update_ai_settings(
     gemini_api_keys: str = Form(None),
     openai_model: str = Form("gpt-4o"),
     anthropic_model: str = Form("claude-3-5-sonnet"),
-    openrouter_model: str = Form('["google/gemini-3.1-flash-lite", "google/gemini-3-flash-preview", "google/gemini-2.5-flash-lite"]'),
+    openrouter_model: str = Form('["google/gemini-3.5-flash", "google/gemini-3-flash", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"]'),
     admin_user = Depends(require_admin)
 ):
     from app.infra.database import get_db_connection
@@ -593,7 +593,7 @@ async def update_ai_settings(
     try:
         json.loads(ai_model_cascade)
     except:
-        ai_model_cascade = '["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]'
+        ai_model_cascade = '["gemini-3.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]'
     
     # Validate gemini_api_keys is valid JSON array
     if gemini_api_keys:

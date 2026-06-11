@@ -6,6 +6,10 @@ from datetime import datetime
 from app.core.config import settings
 
 
+DEFAULT_GEMINI_MODEL_CASCADE = '["gemini-3.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]'
+DEFAULT_OPENROUTER_MODEL_CASCADE = '["google/gemini-3.5-flash", "google/gemini-3-flash", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"]'
+
+
 FORMAL_MIGRATIONS = [
     (
         "20260609_0001_jobs",
@@ -174,7 +178,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS app_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         whisper_model TEXT DEFAULT 'base',
-        ai_model_cascade TEXT DEFAULT '["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]',
+        ai_model_cascade TEXT DEFAULT '["gemini-3.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]',
         piper_model TEXT DEFAULT 'en_GB-cori-high.onnx',
         concurrent_downloads INTEGER DEFAULT 2,
         retention_days INTEGER DEFAULT 30,
@@ -194,7 +198,7 @@ def init_db():
         openrouter_api_key TEXT,
         openai_model TEXT DEFAULT 'gpt-4o',
         anthropic_model TEXT DEFAULT 'claude-3-5-sonnet',
-        openrouter_model TEXT DEFAULT '["google/gemini-3.1-flash-lite", "google/gemini-3-flash-preview", "google/gemini-2.5-flash-lite"]',
+        openrouter_model TEXT DEFAULT '["google/gemini-3.5-flash", "google/gemini-3-flash", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"]',
         app_external_url TEXT,
         
         enable_feed_auth INTEGER DEFAULT 0,
@@ -329,13 +333,14 @@ Transcript Context: {transcript_context}""",))
         "ALTER TABLE app_settings ADD COLUMN summary_prompt_template TEXT",
         
         # Multi-Provider AI migrations
+        "ALTER TABLE app_settings ADD COLUMN ai_model_cascade TEXT DEFAULT '[\"gemini-3.5-flash\", \"gemini-3-flash\", \"gemini-3.1-flash-lite\", \"gemini-2.5-flash\", \"gemini-2.5-flash-lite\"]'",
         "ALTER TABLE app_settings ADD COLUMN active_ai_provider TEXT DEFAULT 'gemini'",
         "ALTER TABLE app_settings ADD COLUMN openai_api_key TEXT",
         "ALTER TABLE app_settings ADD COLUMN anthropic_api_key TEXT",
         "ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT",
         "ALTER TABLE app_settings ADD COLUMN openai_model TEXT DEFAULT 'gpt-4o'",
         "ALTER TABLE app_settings ADD COLUMN anthropic_model TEXT DEFAULT 'claude-3-5-sonnet'",
-        "ALTER TABLE app_settings ADD COLUMN openrouter_model TEXT DEFAULT '[\"google/gemini-3.1-flash-lite\", \"google/gemini-3-flash-preview\", \"google/gemini-2.5-flash-lite\"]'",
+        "ALTER TABLE app_settings ADD COLUMN openrouter_model TEXT DEFAULT '[\"google/gemini-3.5-flash\", \"google/gemini-3-flash\", \"google/gemini-3.1-flash-lite\", \"google/gemini-2.5-flash\", \"google/gemini-2.5-flash-lite\"]'",
         "ALTER TABLE episodes ADD COLUMN processing_flags TEXT",
         "ALTER TABLE app_settings ADD COLUMN gemini_api_key TEXT",
         "ALTER TABLE app_settings ADD COLUMN app_external_url TEXT",
@@ -385,14 +390,27 @@ Transcript Context: {transcript_context}""",))
 
     cursor.execute("""
         UPDATE app_settings
+        SET ai_model_cascade = ?
+        WHERE id = 1
+          AND (
+              ai_model_cascade IS NULL
+              OR ai_model_cascade = ''
+              OR ai_model_cascade = '["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]'
+              OR ai_model_cascade = '["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]'
+          )
+    """, (DEFAULT_GEMINI_MODEL_CASCADE,))
+
+    cursor.execute("""
+        UPDATE app_settings
         SET openrouter_model = ?
         WHERE id = 1
           AND (
               openrouter_model IS NULL
               OR openrouter_model = ''
               OR openrouter_model = 'google/gemini-2.0-flash-001'
+              OR openrouter_model = '["google/gemini-3.1-flash-lite", "google/gemini-3-flash-preview", "google/gemini-2.5-flash-lite"]'
           )
-    """, ('["google/gemini-3.1-flash-lite", "google/gemini-3-flash-preview", "google/gemini-2.5-flash-lite"]',))
+    """, (DEFAULT_OPENROUTER_MODEL_CASCADE,))
 
     _apply_formal_migrations(conn, create_backup=db_existed)
 

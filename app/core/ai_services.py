@@ -430,15 +430,17 @@ class AdDetector:
 
     # Default Gemini Cascade
     DEFAULT_GEMINI_MODELS = [
-        'gemini-2.5-pro',
+        'gemini-3.5-flash',
+        'gemini-3-flash',
+        'gemini-3.1-flash-lite',
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite'
     ]
     DEFAULT_OPENROUTER_MODELS = [
+        'google/gemini-3.5-flash',
+        'google/gemini-3-flash',
         'google/gemini-3.1-flash-lite',
-        'google/gemini-3-flash-preview',
+        'google/gemini-2.5-flash',
         'google/gemini-2.5-flash-lite',
     ]
 

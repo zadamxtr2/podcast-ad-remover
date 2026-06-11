@@ -15,6 +15,28 @@ Gemini direct access uses Google's OpenAI-compatible endpoint through the OpenAI
 | `ANTHROPIC_API_KEY` | Anthropic API Key |
 | `OPENROUTER_API_KEY` | OpenRouter API Key |
 
+## Gemini Model Defaults And Free-Tier Limits
+
+The default direct Gemini cascade is:
+
+1. `gemini-3.5-flash`
+2. `gemini-3-flash`
+3. `gemini-3.1-flash-lite`
+4. `gemini-2.5-flash`
+5. `gemini-2.5-flash-lite`
+
+The OpenRouter Gemini cascade uses the same order with the `google/` prefix. The app tries configured models in order and moves to the next model if a request fails or is rate-limited.
+
+Current Gemini free-tier limits recorded for these defaults:
+
+| Model | Category | RPM | TPM | RPD |
+|-------|----------|-----|-----|-----|
+| Gemini 2.5 Flash | Text-out models | 3 / 5 | 50.11K / 250K | 9 / 20 |
+| Gemini 3 Flash | Text-out models | 2 / 5 | 41.07K / 250K | 9 / 20 |
+| Gemini 2.5 Flash Lite | Text-out models | 1 / 10 | 61.8K / 250K | 6 / 20 |
+| Gemini 3.1 Flash Lite | Text-out models | 1 / 15 | 68.66K / 250K | 5 / 500 |
+| Gemini 3.5 Flash | Text-out models | 0 / 5 | 0 / 250K | 0 / 20 |
+
 ## Optional / Defaults
 
 | Variable | Description | Default |

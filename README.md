@@ -66,7 +66,7 @@ docker run -d \
   jdcb4/podcast-ad-remover:latest
 ```
 
-Open `http://localhost:8000`, then go to **Admin > AI Configuration** to confirm your provider and model settings.
+Open `http://localhost:8000`, then go to **Admin > AI Settings > Text Analysis** to confirm your provider and model settings.
 
 Keep `SESSION_SECRET_KEY` stable once set. Changing it can invalidate browser sessions and signed feed tokens.
 
@@ -118,7 +118,7 @@ You can set keys in the Admin UI or with environment variables:
 
 ## Text-To-Speech
 
-Piper remains the default TTS provider because it is local and does not consume API quota. Admins can optionally switch spoken title intros and audio summaries to Gemini TTS from **Admin > AI Configuration**.
+Piper remains the default TTS provider because it is local and does not consume API quota. Admins can optionally switch spoken title intros and audio summaries to Gemini TTS from **Admin > AI Settings > Voice and TTS**.
 
 Gemini TTS uses the saved Gemini API keys and this default fallback order:
 

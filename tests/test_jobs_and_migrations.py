@@ -433,3 +433,43 @@ def test_recent_running_job_is_not_recovered(isolated_data_dir):
     assert job_repo.recover_stale_running(max_age_minutes=60) == 0
     assert job_repo.count_running() == 1
     assert job_repo.count_claimable() == 0
+
+
+def test_pending_status_creates_job_and_reset_cancels_without_deleting_episode(isolated_data_dir):
+    init_db()
+    with get_db_connection() as conn:
+        subscription_id = conn.execute(
+            "INSERT INTO subscriptions (feed_url, title, slug) VALUES (?, ?, ?)",
+            ("https://example.com/feed.xml", "Example", "example"),
+        ).lastrowid
+        episode_id = conn.execute(
+            """
+            INSERT INTO episodes (subscription_id, guid, title, original_url, status)
+            VALUES (?, ?, ?, ?, 'unprocessed')
+            """,
+            (subscription_id, "manual-episode", "Manual Episode", "https://example.com/manual.mp3"),
+        ).lastrowid
+        conn.commit()
+
+    episode_repo = EpisodeRepository()
+    episode_repo.update_status(episode_id, "pending")
+
+    with get_db_connection() as conn:
+        queued = conn.execute(
+            "SELECT status FROM jobs WHERE episode_id = ? AND type = 'process_episode'",
+            (episode_id,),
+        ).fetchone()
+
+    assert queued["status"] == "queued"
+
+    episode_repo.reset_status(episode_id)
+
+    with get_db_connection() as conn:
+        episode = conn.execute("SELECT status FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+        job = conn.execute(
+            "SELECT status FROM jobs WHERE episode_id = ? AND type = 'process_episode'",
+            (episode_id,),
+        ).fetchone()
+
+    assert episode["status"] == "unprocessed"
+    assert job["status"] == "cancelled"

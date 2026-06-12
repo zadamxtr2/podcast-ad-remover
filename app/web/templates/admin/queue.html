@@ -2,7 +2,10 @@
 
 {% block admin_content %}
 <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-    <h3 class="font-display text-xl font-bold">Processing Queue</h3>
+    <div>
+        <h3 class="font-display text-xl font-bold">Processing Queue</h3>
+        <p class="text-sm text-text-muted mt-1">Queued episodes are claimed when processor capacity is available. Manual downloads now wake the processor immediately, but running jobs still finish or cancel at safe checkpoint boundaries.</p>
+    </div>
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
         <!-- Auto-Refresh Controls -->
         <div
@@ -118,13 +121,8 @@
                     <p class="text-sm text-text-muted">{{ item.podcast_title }}</p>
                 </div>
             </div>
-            <div class="flex-shrink-0">
-                {% if item.status == 'processing' %}
-                <form action="/admin/queue/cancel/{{ item.id }}" method="post" class="inline">
-                    <button type="submit" class="text-red-400 hover:text-red-300 font-medium text-sm"
-                        onclick="return appConfirmSubmit(this.form, 'Cancel processing?', { danger: true })">Cancel</button>
-                </form>
-                {% else %}
+            <div class="flex flex-wrap items-center gap-3 flex-shrink-0">
+                {% if item.status != 'processing' %}
                 <form action="/admin/queue/retry/{{ item.id }}" method="post" class="inline">
                     <button type="submit" class="text-primary-400 hover:text-primary-300 font-medium text-sm">
                         {% if item.status == 'failed' or item.status == 'rate_limited' %}Retry Now{% else %}Process
@@ -132,6 +130,10 @@
                     </button>
                 </form>
                 {% endif %}
+                <form action="/admin/queue/cancel/{{ item.id }}" method="post" class="inline">
+                    <button type="submit" class="text-red-400 hover:text-red-300 font-medium text-sm"
+                        onclick="return appConfirmSubmit(this.form, 'Cancel this queue item?', { danger: true })">Cancel</button>
+                </form>
             </div>
         </div>
         {% if item.status == 'processing' %}

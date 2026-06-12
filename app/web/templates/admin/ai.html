@@ -36,11 +36,39 @@
 </div>
 {% endmacro %}
 
-<h3 class="font-display text-xl font-bold mb-6">AI Configuration</h3>
+{% set page_titles = {
+    'ai_transcription': 'Transcription',
+    'ai_voice': 'Voice And TTS',
+    'ai_text': 'Text Analysis'
+} %}
+
+<h3 class="font-display text-xl font-bold mb-6">{{ page_titles.get(ai_section, 'Text Analysis') }}</h3>
 
 <form action="/admin/ai/update" method="POST" id="aiForm">
+    <input type="hidden" name="redirect_to" value="{{ request.url.path }}">
+    {% if ai_section != 'ai_transcription' %}
+    <input type="hidden" name="whisper_model" value="{{ settings.whisper_model or 'base' }}">
+    {% endif %}
+    {% if ai_section != 'ai_voice' %}
+    <input type="hidden" name="piper_model" value="{{ settings.piper_model or 'en_GB-cori-high.onnx' }}">
+    <input type="hidden" name="tts_provider" value="{{ settings.tts_provider or 'piper' }}">
+    <input type="hidden" name="gemini_tts_voice" value="{{ settings.gemini_tts_voice or 'Orus' }}">
+    <input type="hidden" name="gemini_tts_model_cascade" value="{{ settings.gemini_tts_model_cascade or '[&quot;gemini-3.1-flash-tts-preview&quot;, &quot;gemini-2.5-flash-preview-tts&quot;]' }}">
+    {% endif %}
+    {% if ai_section != 'ai_text' %}
+    <input type="hidden" name="active_ai_provider" value="{{ settings.active_ai_provider or 'gemini' }}">
+    <input type="hidden" name="ai_model_cascade" value="{{ settings.ai_model_cascade or '[&quot;gemini-3.5-flash&quot;, &quot;gemini-3-flash&quot;, &quot;gemini-3.1-flash-lite&quot;, &quot;gemini-2.5-flash&quot;, &quot;gemini-2.5-flash-lite&quot;]' }}">
+    <input type="hidden" name="gemini_api_keys" value="{{ settings.gemini_api_keys or '[]' }}">
+    <input type="hidden" name="openai_api_key" value="{{ settings.openai_api_key or '' }}">
+    <input type="hidden" name="anthropic_api_key" value="{{ settings.anthropic_api_key or '' }}">
+    <input type="hidden" name="openrouter_api_key" value="{{ settings.openrouter_api_key or '' }}">
+    <input type="hidden" name="openai_model" value="{{ settings.openai_model or 'gpt-4o' }}">
+    <input type="hidden" name="anthropic_model" value="{{ settings.anthropic_model or 'claude-3-5-sonnet' }}">
+    <input type="hidden" name="openrouter_model" value="{{ settings.openrouter_model or '[&quot;google/gemini-3.5-flash&quot;, &quot;google/gemini-3-flash&quot;, &quot;google/gemini-3.1-flash-lite&quot;, &quot;google/gemini-2.5-flash&quot;, &quot;google/gemini-2.5-flash-lite&quot;]' }}">
+    {% endif %}
     <div class="space-y-8">
         <!-- Transcription -->
+        {% if ai_section == 'ai_transcription' %}
         <div>
             <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Transcription</h4>
             <label class="block text-sm font-medium text-text-secondary mb-2">Whisper Model</label>
@@ -52,8 +80,10 @@
                 {% endfor %}
             </select>
         </div>
+        {% endif %}
 
         <!-- Voice Provider -->
+        {% if ai_section == 'ai_voice' %}
         <div>
             <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Voice And TTS</h4>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -98,8 +128,10 @@
             {{ shuttle_ui('gemini_tts', 'Gemini TTS Model Cascade', 'gemini_tts_model_cascade',
             settings.gemini_tts_model_cascade | tojson) }}
         </div>
+        {% endif %}
 
         <!-- AI Provider Selection -->
+        {% if ai_section == 'ai_text' %}
         <div>
             <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Text Analysis Provider</h4>
             <select name="active_ai_provider" id="providerSelect" class="select mb-4"
@@ -194,6 +226,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <div class="flex justify-end pt-4 border-t border-white/[0.08]">
             <button type="submit" class="btn-primary">Save Configuration</button>
@@ -265,6 +298,7 @@
         render(provider, availableList, selectedList) {
             const availEl = document.getElementById(`${provider}_available`);
             const selEl = document.getElementById(`${provider}_selected`);
+            if (!availEl || !selEl) return;
 
             availEl.innerHTML = '';
             availableList.forEach(m => {
@@ -305,11 +339,13 @@
         }
 
         updateInput(provider) {
-            document.getElementById(`${provider}_input`).value = JSON.stringify(this.states[provider].selected);
+            const input = document.getElementById(`${provider}_input`);
+            if (input) input.value = JSON.stringify(this.states[provider].selected);
         }
 
         initSortable(provider) {
             const el = document.getElementById(`${provider}_selected`);
+            if (!el) return;
             new Sortable(el, {
                 animation: 150,
                 ghostClass: 'bg-primary-500/20',
@@ -350,6 +386,7 @@
     const shuttleManager = new ShuttleManager();
 
     function toggleProviderSettings() {
+        if (!document.getElementById('providerSelect')) return;
         const val = document.getElementById('providerSelect').value;
         document.querySelectorAll('.provider-section').forEach(el => el.classList.add('hidden'));
         const active = document.getElementById(val + 'Settings');
@@ -357,11 +394,14 @@
     }
     toggleProviderSettings();
 
+    {% if ai_section == 'ai_text' %}
     shuttleManager.init('gemini', {{ settings.ai_model_cascade | tojson }});
-    shuttleManager.init('gemini_tts', {{ settings.gemini_tts_model_cascade | tojson }});
     shuttleManager.init('openai', {{ settings.openai_model | tojson }});
     shuttleManager.init('anthropic', {{ settings.anthropic_model | tojson }});
     shuttleManager.init('openrouter', {{ settings.openrouter_model | tojson }});
+    {% elif ai_section == 'ai_voice' %}
+    shuttleManager.init('gemini_tts', {{ settings.gemini_tts_model_cascade | tojson }});
+    {% endif %}
 
     // Gemini Multi-Key Manager
     class GeminiKeyManager {
@@ -411,11 +451,13 @@
         updateInput() {
             // Filter empty keys and update hidden input
             const validKeys = this.keys.filter(k => k && k.trim());
-            document.getElementById('gemini_api_keys_input').value = JSON.stringify(validKeys);
+            const input = document.getElementById('gemini_api_keys_input');
+            if (input) input.value = JSON.stringify(validKeys);
         }
 
         render() {
             const container = document.getElementById('gemini_keys_container');
+            if (!container) return;
             container.innerHTML = '';
 
             this.keys.forEach((key, index) => {
@@ -460,6 +502,7 @@
     const geminiKeyManager = new GeminiKeyManager({{ settings.gemini_api_keys | tojson if settings.gemini_api_keys else '[]' }});
 
     async function testConnection() {
+        if (!document.getElementById('providerSelect')) return;
         const provider = document.getElementById('providerSelect').value;
         const out = document.getElementById('testOutput');
         out.classList.remove('hidden');

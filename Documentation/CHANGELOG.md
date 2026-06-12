@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+- Split Admin AI Configuration into separate Transcription, Voice and TTS, and Text Analysis pages under a new AI Settings sidebar group.
+- Reorganized admin navigation into AI Settings, Podcast Preferences, System, and User Management groups.
+- Moved Whitelist Mode from System Settings to Global Settings.
+- Fixed manual downloads so they create durable queue jobs immediately instead of only changing episode status to `pending`.
+- Changed Processing Queue cancellation to remove queued/running work without deleting or ignoring the episode.
 - Added optional Gemini TTS for spoken title intros and audio summaries, with selectable Piper/Gemini providers, Gemini voices, and a dedicated Gemini TTS fallback cascade.
-- Split admin AI settings into transcription, voice/TTS, and text-analysis sections.
 - Tidied root maintenance files by removing obsolete alternate-agent pointers and legacy shell helpers, moving the Unraid template under `Documentation/unraid/`, and fixing the GitHub Actions verification trigger.
 - Added optional Apprise-backed admin notifications for access requests, new podcasts, completed episodes, and breaking processing errors.
 - Split the overloaded admin access page into User Management, Access Requests, and Feed Access pages, and fixed admin user deletion from the UI.

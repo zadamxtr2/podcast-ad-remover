@@ -234,3 +234,10 @@ def test_protected_feed_links_warn_that_tokens_are_bearer_secrets():
         assert "until the token is revoked" in template_source
 
     assert '"settings": global_settings' in router_source
+
+
+def test_manual_download_uses_repository_enqueue_path():
+    router_source = Path("app/web/router.py").read_text(encoding="utf-8")
+
+    assert "ep_repo.update_status(episode_id, \"pending\")" in router_source
+    assert "await proc.process_queue()" in router_source

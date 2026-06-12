@@ -490,7 +490,7 @@ async def update_system_settings(
     feed_auth_username: str = Form(None),
     feed_auth_password: str = Form(None),
     public_subscribe_page_enabled: bool = Form(False),
-    whitelist_mode: bool = Form(False),
+    whitelist_mode: str = Form(None),
     redirect_to: str = Form(None),
     admin_user = Depends(require_admin)
 ):
@@ -511,7 +511,7 @@ async def update_system_settings(
     with get_db_connection() as conn:
         # Get current settings
         current_settings = conn.execute(
-            "SELECT auth_enabled, feed_auth_username, feed_auth_password FROM app_settings WHERE id = 1"
+            "SELECT auth_enabled, feed_auth_username, feed_auth_password, whitelist_mode FROM app_settings WHERE id = 1"
         ).fetchone()
         
         # Get current feed password if not changing
@@ -555,6 +555,13 @@ async def update_system_settings(
         old_url = conn.execute("SELECT app_external_url FROM app_settings WHERE id = 1").fetchone()
         url_changed = old_url and old_url['app_external_url'] != app_external_url
         
+        current_whitelist_mode = current_settings["whitelist_mode"] if current_settings and "whitelist_mode" in current_settings.keys() else 0
+        next_whitelist_mode = (
+            current_whitelist_mode
+            if whitelist_mode is None
+            else 1 if str(whitelist_mode).lower() in {"1", "true", "yes", "on"} else 0
+        )
+
         # Update settings
         whisper_cpu_threads = max(0, min(64, whisper_cpu_threads or 0))
         ffmpeg_threads = max(0, min(64, ffmpeg_threads or 0))
@@ -584,7 +591,7 @@ async def update_system_settings(
               effective_feed_username if enable_feed_auth else (feed_auth_username if feed_auth_username else None),
               hashed_feed_password if hashed_feed_password else None,
               1 if public_subscribe_page_enabled else 0,
-              1 if whitelist_mode else 0))
+              next_whitelist_mode))
         conn.commit()
     
     # Regenerate all feeds if the URL changed
@@ -610,9 +617,7 @@ async def update_system_settings(
     url = _safe_local_redirect(redirect_to, "/admin/system?success=System+settings+updated")
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
-# --- Admin: AI ---
-@router.get("/admin/ai", response_class=HTMLResponse)
-async def admin_ai(request: Request):
+def _render_admin_ai(request: Request, ai_section: str):
     from app.core.config import settings
     
     # helper to check which env vars are set
@@ -633,10 +638,29 @@ async def admin_ai(request: Request):
             "user": user,
             "settings": get_global_settings(),
             "pending_requests_count": get_pending_requests_count(),
-            "active_tab": "ai",
+            "active_tab": ai_section,
+            "ai_section": ai_section,
             "env_keys": env_keys
         }
     )
+
+
+# --- Admin: AI ---
+@router.get("/admin/ai", response_class=RedirectResponse)
+async def admin_ai_redirect():
+    return RedirectResponse(url="/admin/ai/text-analysis")
+
+@router.get("/admin/ai/transcription", response_class=HTMLResponse)
+async def admin_ai_transcription(request: Request):
+    return _render_admin_ai(request, "ai_transcription")
+
+@router.get("/admin/ai/voice", response_class=HTMLResponse)
+async def admin_ai_voice(request: Request):
+    return _render_admin_ai(request, "ai_voice")
+
+@router.get("/admin/ai/text-analysis", response_class=HTMLResponse)
+async def admin_ai_text_analysis(request: Request):
+    return _render_admin_ai(request, "ai_text")
 
 @router.post("/admin/ai/update")
 async def update_ai_settings(
@@ -655,6 +679,7 @@ async def update_ai_settings(
     openai_model: str = Form("gpt-4o"),
     anthropic_model: str = Form("claude-3-5-sonnet"),
     openrouter_model: str = Form('["google/gemini-3.5-flash", "google/gemini-3-flash", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"]'),
+    redirect_to: str = Form("/admin/ai/text-analysis"),
     admin_user = Depends(require_admin)
 ):
     from app.infra.database import get_db_connection
@@ -714,7 +739,7 @@ async def update_ai_settings(
             openai_model, anthropic_model, openrouter_model
         ))
         conn.commit()
-    return RedirectResponse(url="/admin/ai", status_code=303)
+    return RedirectResponse(url=_safe_local_redirect(redirect_to, "/admin/ai/text-analysis"), status_code=303)
 
 @router.post("/admin/ai/test")
 async def test_ai_connection(
@@ -917,11 +942,11 @@ async def revoke_feed_token(token_id: int, admin_user = Depends(require_admin)):
 
 @router.post("/admin/queue/cancel/{episode_id}")
 async def cancel_episode(episode_id: int, admin_user = Depends(require_admin)):
-    # Soft delete an episode (marks as ignored, cleans up files)
-    from app.core.processor import Processor
-    proc = Processor()
-    await proc.delete_episode(episode_id)
-    return RedirectResponse(url="/admin/queue", status_code=303)
+    from app.infra.repository import JobRepository
+
+    JobRepository().cancel_active_for_episode(episode_id)
+    ep_repo.reset_status(episode_id)
+    return RedirectResponse(url="/admin/queue?success=Queued+job+cancelled", status_code=303)
 
 @router.post("/admin/queue/retry/{episode_id}")
 async def retry_episode(episode_id: int, admin_user = Depends(require_admin)):
@@ -935,6 +960,7 @@ async def retry_episode(episode_id: int, admin_user = Depends(require_admin)):
     proc = Processor()
     await proc.version_episode(episode_id)
     ep_repo.update_status(episode_id, "pending")
+    await proc.process_queue()
     return RedirectResponse(url="/admin/queue", status_code=303)
 
 @router.post("/api/episodes/{episode_id}/reprocess")
@@ -957,6 +983,7 @@ async def api_reprocess_episode(episode_id: int, skip_transcription: bool = Fals
     await proc.version_episode(episode_id)
     ep_repo.reset_status(episode_id, processing_flags=flags_json)
     ep_repo.update_status(episode_id, "pending")
+    await proc.process_queue()
     return {"status": "ok"}
 
 @router.post("/api/episodes/{episode_id}/ignore")
@@ -972,11 +999,15 @@ async def manual_download_episode(episode_id: int, request: Request, user = Depe
     # Update DB to pending
     from app.infra.database import get_db_connection
     with get_db_connection() as conn:
-        conn.execute("UPDATE episodes SET is_manual_download=1, status='pending' WHERE id=?", (episode_id,))
+        conn.execute("UPDATE episodes SET is_manual_download=1 WHERE id=?", (episode_id,))
         conn.commit()
-    
-    # Background processor will see 'pending' and pick it up (polls every 10s)
-    
+
+    ep_repo.update_status(episode_id, "pending")
+
+    from app.core.processor import Processor
+    proc = Processor()
+    await proc.process_queue()
+
     return RedirectResponse(url=request.headers.get("referer") or "/", status_code=303)
 
 
@@ -1639,6 +1670,7 @@ async def update_global_subscription_settings(
     default_retention_days: int = Form(30),
     default_manual_retention_days: int = Form(14),
     default_custom_instructions: str = Form(None),
+    whitelist_mode: bool = Form(False),
     admin_user = Depends(require_admin)
 ):
     with get_db_connection() as conn:
@@ -1654,13 +1686,14 @@ async def update_global_subscription_settings(
                 default_retention_limit = ?,
                 default_retention_days = ?,
                 default_manual_retention_days = ?,
-                default_custom_instructions = ?
+                default_custom_instructions = ?,
+                whitelist_mode = ?
             WHERE id = 1
         """, (
             default_remove_ads, default_remove_promos, default_remove_intros, default_remove_outros,
             default_ai_rewrite_description, default_ai_audio_summary, default_append_title_intro,
             default_retention_limit, default_retention_days, default_manual_retention_days,
-            default_custom_instructions
+            default_custom_instructions, 1 if whitelist_mode else 0
         ))
         conn.commit()
         

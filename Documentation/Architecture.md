@@ -97,6 +97,8 @@ Current job statuses are:
 
 Startup migration creates a `schema_migrations` table and backs up the current database to `/data/backups/` before applying formal migrations.
 
+Manual downloads and reprocess actions must use repository status helpers that enqueue a `jobs` row, not raw episode status updates. Queue cancellation is non-destructive: it marks the active job cancelled and returns the episode to `unprocessed`; deleting or ignoring an episode remains a separate action.
+
 ### Feed Access
 
 RSS feeds and audio files remain public when feed authentication is disabled. When feed authentication is enabled, generated dashboard links use bearer tokens:

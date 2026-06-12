@@ -48,7 +48,7 @@ If you prefer to configure the container manually without the XML template:
 Once running, access the Web UI at `http://YOUR_UNRAID_IP:8000`.
 
 ### API Keys
-You can set your AI API keys (Gemini, OpenAI, Anthropic, or OpenRouter) directly in the Web UI under **Admin > AI Configuration**. You do not need to pass them as environment variables during installation, although you can if you prefer.
+You can set your AI API keys (Gemini, OpenAI, Anthropic, or OpenRouter) directly in the Web UI under **Admin > AI Settings > Text Analysis**. You do not need to pass them as environment variables during installation, although you can if you prefer.
 
 ### Public URL
 Set `BASE_URL` to a URL your podcast clients can reach, such as `http://YOUR_UNRAID_IP:8000` for LAN-only installs or your HTTPS reverse-proxy URL for remote access.

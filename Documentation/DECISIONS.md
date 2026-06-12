@@ -33,3 +33,7 @@ Gemini remains the recommended provider for most homelab installs because the fr
 ## 2026-06-12: Keep amd64 primary and make ARM64 experimental without Piper TTS
 
 The default Docker image remains `linux/amd64` with Piper TTS installed. Apple Silicon / ARM64 is useful to test, but Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels. The experimental ARM64 build uses `INSTALL_TTS=0` so the core podcast workflow can be tested without reworking the app around TTS.
+
+## 2026-06-12: Separate global podcast records from user libraries
+
+Podcast rows remain global so the app only downloads, processes, stores, and publishes one copy of each feed. User-specific interest is tracked through `user_subscriptions`. The user who first adds a podcast becomes its settings owner, but only admins can delete the global podcast and files. If an owner removes the podcast from their own library, the global podcast becomes unowned for an admin to review.

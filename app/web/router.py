@@ -68,6 +68,20 @@ def get_global_settings():
             return dict(row)
     return {}
 
+
+def _real_user_id(user) -> int | None:
+    user_id = getattr(user, "id", None)
+    return user_id if user_id and user_id > 0 else None
+
+
+def _can_manage_subscription(user, sub) -> bool:
+    if not user:
+        return False
+    if getattr(user, "is_admin", False):
+        return True
+    user_id = _real_user_id(user)
+    return bool(user_id and getattr(sub, "owner_user_id", None) == user_id)
+
 from app.core.utils import get_app_base_url
 
 
@@ -1174,10 +1188,15 @@ async def update_request_username(
 def _render_index(request: Request, error: str = None):
     from app.infra.repository import SubscriptionRepository
     sub_repo = SubscriptionRepository()
-    subs = sub_repo.get_all()
+    user = get_current_user(request)
+    user_id = _real_user_id(user)
+    requested_view = request.query_params.get("view") if hasattr(request, "query_params") else None
+    library_view = requested_view if requested_view in ("mine", "library") else ("mine" if user_id else "library")
+    subs = sub_repo.get_all(user_id=user_id, only_user=library_view == "mine")
+    all_subs = sub_repo.get_all()
     
     # Calculate stats
-    total_podcasts = len(subs)
+    total_podcasts = len(all_subs)
     total_episodes = 0
     total_duration = 0 # seconds
     total_size = 0 # bytes
@@ -1197,8 +1216,6 @@ def _render_index(request: Request, error: str = None):
         "size_gb": round(total_size / (1024 * 1024 * 1024), 2)
     }
 
-    user = get_current_user(request)
-    
     subs_with_links = []
     global_settings = get_global_settings()
     for sub in subs:
@@ -1234,6 +1251,11 @@ def _render_index(request: Request, error: str = None):
                 (sub.id,)
             ).fetchone()
             processing_count = processing_row['count'] if processing_row else 0
+            user_library_row = conn.execute(
+                "SELECT COUNT(*) as count FROM user_subscriptions WHERE subscription_id = ?",
+                (sub.id,),
+            ).fetchone()
+            user_library_count = user_library_row["count"] if user_library_row else 0
         
         latest_summary = None
         latest_description = None
@@ -1258,14 +1280,16 @@ def _render_index(request: Request, error: str = None):
             "total_listens": ep_repo.get_subscription_listen_count(sub.id),
             "latest_ai_summary": latest_summary,
             "latest_description": latest_description,
-            "latest_episode_date": latest_episode_date
+            "latest_episode_date": latest_episode_date,
+            "in_user_library": sub_repo.is_in_user_library(user_id, sub.id) if user_id else True,
+            "can_manage": _can_manage_subscription(user, sub),
+            "owner_username": sub_repo.get_owner_username(sub.id),
+            "user_library_count": user_library_count,
         })
 
     # Get queue data for dashboard display
     queue = ep_repo.get_queue()
 
-    user = get_current_user(request)
-    
     # Determine if AI is configured (DB Overrides/Augments Env)
     from app.core.config import settings
 
@@ -1286,7 +1310,7 @@ def _render_index(request: Request, error: str = None):
 
     # Generate Unified Links if subscriptions exist
     unified_links = None
-    if subs:
+    if all_subs:
         # Determine Base URL using consolidated logic
         base_url = get_app_base_url(global_settings, request)
         
@@ -1318,10 +1342,15 @@ def _render_index(request: Request, error: str = None):
         name="index.html",
         context={
             "csp_nonce": get_csp_nonce(request),
+            "request": request,
             "user": user,
             "subscriptions": subs_with_links,
+            "library_view": library_view,
+            "my_podcast_count": len(sub_repo.get_all(user_id=user_id, only_user=True)) if user_id else len(all_subs),
+            "library_podcast_count": len(all_subs),
             "stats": stats,
             "error": error,
+            "success": request.query_params.get("success") if hasattr(request, "query_params") else None,
             "config_warning": config_warning,
             "queue": queue,
             "unified_links": unified_links,
@@ -1474,7 +1503,9 @@ async def add_subscription(
         # Check if exists (quick DB check)
         existing = sub_repo.get_by_url(feed_url)
         if existing:
-            return _render_index(request, error="Subscription already exists")
+            added = sub_repo.add_to_user_library(_real_user_id(user), existing.id)
+            message = "Podcast added to My Podcasts from the library" if added else "Podcast is already in My Podcasts"
+            return RedirectResponse(url=f"/?view=mine&success={quote(message)}", status_code=303)
         
         # Create subscription with placeholder data
         # Fetch global defaults first
@@ -1486,7 +1517,15 @@ async def add_subscription(
         retention_limit = initial_count
         
         sub_create = SubscriptionCreate(feed_url=feed_url)
-        new_sub = sub_repo.create(sub_create, "Loading...", f"loading-{int(__import__('time').time())}", None, "Fetching feed information...", retention_limit=retention_limit)
+        new_sub = sub_repo.create(
+            sub_create,
+            "Loading...",
+            f"loading-{int(__import__('time').time())}",
+            None,
+            "Fetching feed information...",
+            retention_limit=retention_limit,
+            owner_user_id=_real_user_id(user),
+        )
         
         # Apply other global defaults immediately
         sub_repo.update_settings(
@@ -1540,6 +1579,37 @@ async def add_subscription(
     except Exception as e:
         return _render_index(request, error=str(e))
 
+
+@router.post("/subscriptions/{id}/library")
+async def update_user_library_membership(
+    request: Request,
+    id: int,
+    action: str = Form("toggle"),
+    redirect_to: str = Form(None),
+    user = Depends(require_auth),
+):
+    sub = sub_repo.get_by_id(id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    user_id = _real_user_id(user)
+    if not user_id:
+        return RedirectResponse(url=_safe_local_redirect(redirect_to, "/"), status_code=303)
+
+    is_member = sub_repo.is_in_user_library(user_id, id)
+    if action == "add" or (action == "toggle" and not is_member):
+        changed = sub_repo.add_to_user_library(user_id, id)
+        message = "Podcast added to My Podcasts" if changed else "Podcast is already in My Podcasts"
+    elif action == "remove" or (action == "toggle" and is_member):
+        changed = sub_repo.remove_from_user_library(user_id, id)
+        message = "Podcast removed from My Podcasts" if changed else "Podcast was not in My Podcasts"
+    else:
+        message = "No library change made"
+
+    target = _safe_local_redirect(redirect_to, "/")
+    separator = "&" if "?" in target else "?"
+    return RedirectResponse(url=f"{target}{separator}success={quote(message)}", status_code=303)
+
 @router.get("/subscriptions/{id}", response_class=HTMLResponse)
 async def view_subscription(request: Request, id: int):
     sub = sub_repo.get_by_id(id)
@@ -1569,11 +1639,18 @@ async def view_subscription(request: Request, id: int):
     # Get current user for nav bar and links
     from app.web.auth import get_current_user
     user = get_current_user(request)
+    user_id = _real_user_id(user)
 
     links = generate_rss_links(request, sub, global_settings, user)
     
     # Get total listen count for this subscription
     total_listens = ep_repo.get_subscription_listen_count(sub.id)
+    with get_db_connection() as conn:
+        user_library_row = conn.execute(
+            "SELECT COUNT(*) as count FROM user_subscriptions WHERE subscription_id = ?",
+            (sub.id,),
+        ).fetchone()
+        user_library_count = user_library_row["count"] if user_library_row else 0
 
     return templates.TemplateResponse(
         request=request,
@@ -1585,6 +1662,10 @@ async def view_subscription(request: Request, id: int):
             "subscription": sub,
             "episodes": episodes,
             "links": links,
+            "is_in_user_library": sub_repo.is_in_user_library(user_id, sub.id) if user_id else True,
+            "can_manage_subscription": _can_manage_subscription(user, sub),
+            "owner_username": sub_repo.get_owner_username(sub.id),
+            "user_library_count": user_library_count,
             "basename": lambda p: p.split('/')[-1] if p else '',
             "format_duration": format_duration,
             "total_listens": total_listens,
@@ -1643,6 +1724,12 @@ async def update_settings(
     retention_limit: int = Form(1),
     user = Depends(require_auth),
 ):
+    sub = sub_repo.get_by_id(id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    if not _can_manage_subscription(user, sub):
+        raise HTTPException(status_code=403, detail="Only admins and the podcast owner can change podcast settings")
+
     sub_repo.update_settings(
         id, 
         remove_ads, 

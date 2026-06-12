@@ -81,6 +81,32 @@ FORMAL_MIGRATIONS = [
             """,
         ],
     ),
+    (
+        "20260612_0003_user_podcast_library",
+        [
+            "ALTER TABLE subscriptions ADD COLUMN owner_user_id INTEGER",
+            """
+            CREATE TABLE IF NOT EXISTS user_subscriptions (
+                user_id INTEGER NOT NULL,
+                subscription_id INTEGER NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, subscription_id),
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                FOREIGN KEY (subscription_id) REFERENCES subscriptions (id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_user_subscriptions_subscription
+            ON user_subscriptions(subscription_id)
+            """,
+            """
+            INSERT OR IGNORE INTO user_subscriptions (user_id, subscription_id)
+            SELECT u.id, s.id
+            FROM users u
+            CROSS JOIN subscriptions s
+            """,
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000

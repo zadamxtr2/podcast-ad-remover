@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% if request.query_params.get('success') %}
+<script nonce="{{ csp_nonce }}">
+    appToast({{ request.query_params.get('success')|tojson }}, { type: 'success' });
+</script>
+{% endif %}
+
 <div class="mb-6">
     <a href="/" class="text-primary-400 hover:text-primary-300 transition-colors">&larr; Back to Subscriptions</a>
 </div>
@@ -27,7 +33,8 @@
             </div>
             {% endif %}
 
-            <!-- Mobile Delete Button (Between Image and Title) -->
+            <!-- Mobile Delete / Library Button (Between Image and Title) -->
+            {% if user and user.is_admin %}
             <button onclick="deleteSubscription({{ subscription.id }})"
                 class="md:hidden px-6 py-3 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-2xl transition-all flex items-center justify-center gap-3 text-sm font-bold border border-red-500/20 shadow-lg -mt-4 mb-2"
                 title="Delete subscription and all local files">
@@ -38,6 +45,16 @@
                 </svg>
                 Delete Subscription and Files
             </button>
+            {% elif user and user.id and user.id > 0 and is_in_user_library %}
+            <form action="/subscriptions/{{ subscription.id }}/library" method="post" class="md:hidden -mt-4 mb-2">
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="redirect_to" value="/?view=mine">
+                <button type="submit"
+                    class="px-6 py-3 text-primary-300 hover:text-primary-200 bg-primary-500/10 hover:bg-primary-500/20 rounded-2xl transition-all flex items-center justify-center gap-3 text-sm font-bold border border-primary-500/20 shadow-lg">
+                    Remove from My Podcasts
+                </button>
+            </form>
+            {% endif %}
 
             <!-- Content -->
             <div class="flex-1 min-w-0 text-center md:text-left pt-2 pb-2">
@@ -46,6 +63,27 @@
                         class="font-display text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-4 leading-tight">
                         {{ subscription.title }}
                     </h1>
+                    <div class="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-4">
+                        {% if owner_username %}
+                        <span class="badge-neutral">Owner: {{ owner_username }}</span>
+                        {% elif user and user.is_admin %}
+                        <span class="badge-warning">Unowned</span>
+                        {% endif %}
+                        {% if user and user.is_admin %}
+                        <span class="badge-neutral">{{ user_library_count }} user{% if user_library_count != 1 %}s{% endif %}</span>
+                        <span class="badge-neutral">{{ total_listens }} play{% if total_listens != 1 %}s{% endif %}</span>
+                        {% endif %}
+                        {% if user and user.id and user.id > 0 %}
+                        <form action="/subscriptions/{{ subscription.id }}/library" method="post">
+                            <input type="hidden" name="redirect_to" value="/subscriptions/{{ subscription.id }}">
+                            <input type="hidden" name="action" value="{% if is_in_user_library %}remove{% else %}add{% endif %}">
+                            <button type="submit"
+                                class="{% if is_in_user_library %}badge-info{% else %}badge-soft{% endif %}">
+                                {% if is_in_user_library %}In My Podcasts{% else %}Add to My Podcasts{% endif %}
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
                     {% if subscription.description %}
                     <div
                         class="text-text-secondary leading-relaxed max-w-2xl text-base font-medium opacity-90 line-clamp-3 md:line-clamp-4">
@@ -116,6 +154,7 @@
             </div>
 
             <!-- Delete button (desktop only - top right) -->
+            {% if user and user.is_admin %}
             <button onclick="deleteSubscription({{ subscription.id }})"
                 class="hidden md:block absolute top-6 right-6 p-3 text-white/20 hover:text-red-400 hover:bg-red-500/10 rounded-2xl transition-all"
                 title="Delete subscription and all local files">
@@ -125,6 +164,7 @@
                     </path>
                 </svg>
             </button>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -134,9 +174,12 @@
     <div class="flex justify-between items-center mb-4 cursor-pointer"
         onclick="document.getElementById('settings-form').classList.toggle('hidden')">
         <h3 class="font-display text-xl font-bold">Processing Settings</h3>
-        <span class="text-text-muted text-sm hover:text-text-secondary transition-colors">Toggle</span>
+        <span class="text-text-muted text-sm hover:text-text-secondary transition-colors">
+            {% if can_manage_subscription %}Toggle{% else %}View{% endif %}
+        </span>
     </div>
 
+    {% if can_manage_subscription %}
     <form id="settings-form" action="/subscriptions/{{ subscription.id }}/settings" method="POST" class="hidden">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
             <div class="space-y-6">
@@ -245,6 +288,35 @@
             <button type="submit" class="btn-primary">Save Settings</button>
         </div>
     </form>
+    {% else %}
+    <div id="settings-form" class="hidden">
+        <div class="alert-info">
+            <div>
+                <strong>Read-only settings.</strong>
+                Only admins and the podcast owner can change per-podcast processing settings.
+                You can still subscribe, refresh the show, and download episodes.
+            </div>
+        </div>
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 text-sm text-text-secondary">
+            <div class="flex justify-between gap-4 border-b border-white/[0.06] py-2">
+                <dt>Remove ads</dt>
+                <dd>{{ "On" if subscription.remove_ads else "Off" }}</dd>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-white/[0.06] py-2">
+                <dt>Remove promos</dt>
+                <dd>{{ "On" if subscription.remove_promos else "Off" }}</dd>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-white/[0.06] py-2">
+                <dt>Auto-downloads</dt>
+                <dd>{{ subscription.retention_limit or 0 }} episode{% if (subscription.retention_limit or 0) != 1 %}s{% endif %}</dd>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-white/[0.06] py-2">
+                <dt>AI audio summary</dt>
+                <dd>{{ "On" if subscription.ai_audio_summary else "Off" }}</dd>
+            </div>
+        </dl>
+    </div>
+    {% endif %}
 </div>
 
 

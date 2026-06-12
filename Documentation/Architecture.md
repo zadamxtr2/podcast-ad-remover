@@ -53,6 +53,18 @@ Supporting modules include:
 - `app/infra/database.py`: SQLite initialization and schema evolution.
 - `app/infra/repository.py`: database access methods.
 
+### Podcast Library and Ownership
+
+`subscriptions` is the global podcast library. There is still only one row, episode set, media directory, and generated RSS feed per podcast. User-specific interest is tracked separately in:
+
+```text
+user_subscriptions(user_id, subscription_id, added_at)
+```
+
+The dashboard defaults logged-in users to a "My Podcasts" view backed by `user_subscriptions`, with a Library view for all global podcasts. Adding an existing podcast from search or the Library only adds that global podcast to the user's list.
+
+`subscriptions.owner_user_id` records the user who first added a podcast. Admins can change settings for any podcast. The owner can change settings for their podcast while they own it. Other users can view, subscribe, refresh, and trigger downloads, but cannot change per-podcast settings. Only admins can delete the global podcast and local files; when an owner removes a podcast from their own list, the podcast becomes unowned instead.
+
 ### Job State
 
 Processing is coordinated through a durable SQLite `jobs` table. Episodes still keep a user-facing `episodes.status`, while workers claim due jobs transactionally and update job state as work runs, retries, completes, or is cancelled.

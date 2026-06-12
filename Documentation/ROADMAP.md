@@ -21,6 +21,7 @@ This roadmap lists improvement candidates. It is not a release commitment.
 
 - Expand first-run setup into a guided wizard for API keys and recommended defaults; the current System Settings checklist covers admin credentials and URL/feed checks.
 - Add clearer queue state explanations for failed, rate-limited, ignored, and unprocessed episodes.
+- Add optional token-attributed feed/audio access logging if admins need true per-user download analytics. Current stats show per-podcast user-library counts and aggregate plays.
 - Add safer backup/export guidance before upgrades.
 - Split large templates and move inline queue/episode JavaScript into static files.
 

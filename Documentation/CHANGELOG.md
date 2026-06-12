@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a global podcast library plus per-user "My Podcasts" membership without duplicating podcast rows.
+- Added podcast ownership rules: admins can change any podcast settings, owners can change settings for podcasts they added, and only admins can delete the global podcast/files.
+- Added admin-visible per-podcast library-user counts alongside existing total play counts.
 - Split Piper TTS into an optional Docker dependency layer while keeping it enabled for default builds.
 - Added an experimental no-TTS `linux/arm64` Docker build command for Apple Silicon / ARM testing.
 - Refreshed the README to match the current app state and added current UI screenshots.

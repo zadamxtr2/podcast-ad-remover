@@ -8,7 +8,7 @@ It is built for homelab-style deployment: one Docker container, SQLite state und
 
 ### Dashboard
 
-The dashboard shows subscriptions, processing state, unified feed links, saved storage, and per-podcast feed links.
+The dashboard shows My Podcasts or the global Library, processing state, unified feed links, saved storage, and per-podcast feed links.
 
 ![Dashboard](Documentation/screenshots/dashboard.png)
 
@@ -33,6 +33,8 @@ The admin queue shows active jobs, queued/retry states, disk usage, next feed ch
 ## Features
 
 - Podcast search and RSS subscription management.
+- Global podcast library with per-user My Podcasts lists and one shared copy of each podcast.
+- Podcast ownership rules for per-podcast settings, with admin-only global deletion.
 - Automatic episode download and retention controls.
 - Local transcription with Whisper/faster-whisper.
 - LLM-based ad, promo, intro, and outro detection.

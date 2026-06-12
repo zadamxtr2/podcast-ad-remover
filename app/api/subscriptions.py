@@ -15,26 +15,41 @@ from app.core.config import settings
 router = APIRouter()
 repo = SubscriptionRepository()
 
+
+def _real_user_id(user) -> int | None:
+    user_id = getattr(user, "id", None)
+    return user_id if user_id and user_id > 0 else None
+
+
+def _can_manage_subscription(user, sub) -> bool:
+    if getattr(user, "is_admin", False):
+        return True
+    user_id = _real_user_id(user)
+    return bool(user_id and getattr(sub, "owner_user_id", None) == user_id)
+
 # Helper to get processor (in a real app, use dependency injection)
 def get_processor():
     return Processor()
 
 @router.get("/subscriptions", response_model=List[Subscription])
 async def list_subscriptions(user = Depends(require_auth)):
-    return repo.get_all()
+    return repo.get_all(user_id=_real_user_id(user), only_user=True)
 
 @router.post("/subscriptions", response_model=Subscription)
 async def create_subscription(sub: SubscriptionCreate, initial_count: int = 5, user = Depends(require_auth)):
     existing = repo.get_by_url(sub.feed_url)
     if existing:
-        raise HTTPException(status_code=400, detail="Subscription already exists")
+        added = repo.add_to_user_library(_real_user_id(user), existing.id)
+        if added:
+            return existing
+        raise HTTPException(status_code=400, detail="Subscription already exists in your podcasts")
     
     try:
         # Parse feed to get title
         title, slug, image_url, description = FeedManager.parse_feed(sub.feed_url)
         
         # Save to DB
-        new_sub = repo.create(sub, title, slug, image_url, description=description)
+        new_sub = repo.create(sub, title, slug, image_url, description=description, owner_user_id=_real_user_id(user))
         
         # Trigger initial check
         proc = get_processor()
@@ -54,6 +69,10 @@ async def delete_subscription(id: int, user = Depends(require_auth)):
     sub = repo.get_by_id(id)
     
     if sub:
+        if not getattr(user, "is_admin", False):
+            removed = repo.remove_from_user_library(_real_user_id(user), id)
+            return {"status": "removed_from_my_podcasts" if removed else "not_in_my_podcasts"}
+
         # 1. Delete all episodes using Processor (cleans DB + all artifact files)
         proc = get_processor()
         ep_repo = EpisodeRepository()

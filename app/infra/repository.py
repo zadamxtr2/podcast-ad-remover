@@ -8,15 +8,33 @@ from app.infra.database import get_db_connection
 from app.core.models import SubscriptionCreate, Subscription, Episode
 
 class SubscriptionRepository:
-    def create(self, sub: SubscriptionCreate, title: str, slug: str, image_url: str = None, description: str = None, retention_limit: int = 1) -> Subscription:
+    def create(
+        self,
+        sub: SubscriptionCreate,
+        title: str,
+        slug: str,
+        image_url: str = None,
+        description: str = None,
+        retention_limit: int = 1,
+        owner_user_id: int | None = None,
+    ) -> Subscription:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute(
-                    "INSERT INTO subscriptions (feed_url, title, slug, image_url, description, retention_limit) VALUES (?, ?, ?, ?, ?, ?)",
-                    (sub.feed_url, title, slug, image_url, description, retention_limit)
+                    """
+                    INSERT INTO subscriptions
+                        (feed_url, title, slug, image_url, description, retention_limit, owner_user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (sub.feed_url, title, slug, image_url, description, retention_limit, owner_user_id)
                 )
                 sub_id = cursor.lastrowid
+                if owner_user_id and owner_user_id > 0:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO user_subscriptions (user_id, subscription_id) VALUES (?, ?)",
+                        (owner_user_id, sub_id),
+                    )
                 conn.commit()
                 return self.get_by_id(sub_id)
             except sqlite3.IntegrityError:
@@ -29,10 +47,71 @@ class SubscriptionRepository:
                 return Subscription.model_validate(dict(row))
             return None
 
-    def get_all(self) -> List[Subscription]:
+    def get_all(self, user_id: int | None = None, only_user: bool = False) -> List[Subscription]:
         with get_db_connection() as conn:
-            rows = conn.execute("SELECT * FROM subscriptions").fetchall()
+            if only_user and user_id and user_id > 0:
+                rows = conn.execute(
+                    """
+                    SELECT s.*
+                    FROM subscriptions s
+                    JOIN user_subscriptions us ON us.subscription_id = s.id
+                    WHERE us.user_id = ?
+                    ORDER BY s.title COLLATE NOCASE
+                    """,
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM subscriptions ORDER BY title COLLATE NOCASE").fetchall()
             return [Subscription.model_validate(dict(row)) for row in rows]
+
+    def add_to_user_library(self, user_id: int | None, subscription_id: int) -> bool:
+        if not user_id or user_id <= 0:
+            return False
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO user_subscriptions (user_id, subscription_id) VALUES (?, ?)",
+                (user_id, subscription_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def remove_from_user_library(self, user_id: int | None, subscription_id: int) -> bool:
+        if not user_id or user_id <= 0:
+            return False
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM user_subscriptions WHERE user_id = ? AND subscription_id = ?",
+                (user_id, subscription_id),
+            )
+            conn.execute(
+                "UPDATE subscriptions SET owner_user_id = NULL WHERE id = ? AND owner_user_id = ?",
+                (subscription_id, user_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def is_in_user_library(self, user_id: int | None, subscription_id: int) -> bool:
+        if not user_id or user_id <= 0:
+            return False
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM user_subscriptions WHERE user_id = ? AND subscription_id = ?",
+                (user_id, subscription_id),
+            ).fetchone()
+            return row is not None
+
+    def get_owner_username(self, subscription_id: int) -> str | None:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT u.username
+                FROM subscriptions s
+                JOIN users u ON u.id = s.owner_user_id
+                WHERE s.id = ?
+                """,
+                (subscription_id,),
+            ).fetchone()
+            return row["username"] if row else None
 
     def get_by_url(self, url: str) -> Optional[Subscription]:
         with get_db_connection() as conn:
@@ -51,6 +130,7 @@ class SubscriptionRepository:
     def delete(self, id: int):
         with get_db_connection() as conn:
             conn.execute("DELETE FROM episodes WHERE subscription_id = ?", (id,))
+            conn.execute("DELETE FROM user_subscriptions WHERE subscription_id = ?", (id,))
             conn.execute("DELETE FROM subscriptions WHERE id = ?", (id,))
             conn.commit()
 

@@ -1,7 +1,8 @@
 import sqlite3
 
 from app.infra.database import get_db_connection, init_db
-from app.infra.repository import EpisodeRepository, JobRepository
+from app.core.models import SubscriptionCreate
+from app.infra.repository import EpisodeRepository, JobRepository, SubscriptionRepository
 from app.core.config import settings
 
 
@@ -44,9 +45,11 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
 
     assert "jobs" in tables
     assert "feed_tokens" in tables
+    assert "user_subscriptions" in tables
     assert "schema_migrations" in tables
     assert "20260609_0001_jobs" in migrations
     assert "20260609_0002_feed_tokens" in migrations
+    assert "20260612_0003_user_podcast_library" in migrations
 
 
 def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
@@ -172,6 +175,80 @@ def test_legacy_database_rows_survive_and_pending_work_is_backfilled(isolated_da
     assert len(backups) == 1
 
 
+def test_user_podcast_library_migration_backfills_existing_users(isolated_data_dir):
+    db_path = isolated_data_dir / "db" / "podcasts.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feed_url TEXT UNIQUE NOT NULL,
+            title TEXT,
+            slug TEXT UNIQUE,
+            is_active BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_checked_at TIMESTAMP
+        );
+        CREATE TABLE app_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            whisper_model TEXT DEFAULT 'base',
+            concurrent_downloads INTEGER DEFAULT 2,
+            retention_days INTEGER DEFAULT 30
+        );
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_admin INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP
+        );
+        CREATE TABLE episodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subscription_id INTEGER NOT NULL,
+            guid TEXT NOT NULL,
+            title TEXT NOT NULL,
+            original_url TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            error_message TEXT,
+            retry_count INTEGER DEFAULT 0,
+            next_retry_at TIMESTAMP,
+            UNIQUE(subscription_id, guid)
+        );
+        INSERT INTO app_settings (id) VALUES (1);
+        INSERT INTO users (id, username, password_hash, is_admin)
+        VALUES (1, 'admin', 'hash', 1), (2, 'viewer', 'hash', 0);
+        INSERT INTO subscriptions (id, feed_url, title, slug)
+        VALUES
+            (1, 'https://example.com/one.xml', 'One', 'one'),
+            (2, 'https://example.com/two.xml', 'Two', 'two');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    init_db()
+
+    with get_db_connection() as migrated:
+        subscription_columns = {
+            row["name"]
+            for row in migrated.execute("PRAGMA table_info(subscriptions)").fetchall()
+        }
+        rows = migrated.execute(
+            "SELECT user_id, subscription_id FROM user_subscriptions ORDER BY user_id, subscription_id"
+        ).fetchall()
+
+    assert "owner_user_id" in subscription_columns
+    assert [(row["user_id"], row["subscription_id"]) for row in rows] == [
+        (1, 1),
+        (1, 2),
+        (2, 1),
+        (2, 2),
+    ]
+
+
 def test_pending_episode_creates_and_claims_job(isolated_data_dir):
     init_db()
 
@@ -215,6 +292,35 @@ def test_pending_episode_creates_and_claims_job(isolated_data_dir):
     assert job["status"] == "running"
     assert job["attempts"] == 1
     assert job["locked_by"] == "pytest-worker"
+
+
+def test_subscription_owner_is_member_and_removal_releases_ownership(isolated_data_dir):
+    init_db()
+    repo = SubscriptionRepository()
+
+    with get_db_connection() as conn:
+        user_id = conn.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 0)",
+            ("owner", "hash"),
+        ).lastrowid
+        conn.commit()
+
+    sub = repo.create(
+        SubscriptionCreate(feed_url="https://example.com/feed.xml"),
+        "Owned Show",
+        "owned-show",
+        owner_user_id=user_id,
+    )
+
+    assert sub.owner_user_id == user_id
+    assert repo.is_in_user_library(user_id, sub.id) is True
+
+    removed = repo.remove_from_user_library(user_id, sub.id)
+    updated = repo.get_by_id(sub.id)
+
+    assert removed is True
+    assert updated.owner_user_id is None
+    assert repo.is_in_user_library(user_id, sub.id) is False
 
 
 def test_stale_running_job_is_recovered_and_claimable(isolated_data_dir):

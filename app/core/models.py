@@ -32,6 +32,7 @@ class Subscription(SubscriptionBase):
     append_title_intro: bool = False
     ai_rewrite_description: bool = False
     ai_audio_summary: bool = False
+    owner_user_id: Optional[int] = None
     
     # Retention
     retention_days: Optional[int] = 30

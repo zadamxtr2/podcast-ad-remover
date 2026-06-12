@@ -20,6 +20,7 @@ This document tracks the current audit branch findings, what was implemented, an
 - Added a login-page link to `/subscribe` when the public subscribe page is enabled.
 - Clarified destructive action labels for removing downloads, ignoring episodes, reprocessing, and deleting subscriptions.
 - Added a setup checklist for admin credentials, base URL, subscribe page, and feed URL checks.
+- Added optional Apprise-backed admin notifications for access requests, new podcasts, completed episodes, and breaking processing errors.
 - Added live queue polling and an operation dashboard for current job, resource, retry, and failure state.
 - Fixed API subscription creation to preserve feed descriptions from `FeedManager.parse_feed()`.
 

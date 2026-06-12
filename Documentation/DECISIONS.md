@@ -41,3 +41,7 @@ Podcast rows remain global so the app only downloads, processes, stores, and pub
 ## 2026-06-12: Let access-request users choose their password
 
 Access requests should not make admins copy generated passwords back to users. New requests collect a password, store only the bcrypt hash, and copy that hash into `users` if approved. Admins approve identity/access, not credentials.
+
+## 2026-06-12: Use Apprise for optional admin notifications
+
+Notifications should stay optional and provider-agnostic. Embedding the Apprise Python library keeps the app to one container while supporting ntfy, Gotify, Pushover, Discord, email, webhooks, and other targets through configuration rather than provider-specific code.

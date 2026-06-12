@@ -67,3 +67,9 @@ These are configured from the Admin UI rather than environment variables:
 | `whisper_cpu_threads` | Faster-Whisper CPU thread cap. `0` uses the library default. | `0` |
 | `ffmpeg_threads` | FFmpeg thread cap. `0` lets FFmpeg choose automatically. | `0` |
 | `unload_whisper_after_job` | Unload the local Whisper model after the queue empties to reduce idle RAM. | `0` |
+| `notifications_enabled` | Enable Apprise-backed admin notifications. | `0` |
+| `notification_urls` | Newline-separated Apprise URLs. Treat values as secrets because they can contain tokens or webhooks. | empty |
+| `notify_access_requests` | Send notification when a user requests dashboard access. | `1` |
+| `notify_new_podcasts` | Send notification when a new global podcast is added. | `1` |
+| `notify_episode_downloads` | Send notification when an episode finishes processing and is available in feeds. | `1` |
+| `notify_breaking_errors` | Send notification for max-retry processing failures and top-level worker errors. | `1` |

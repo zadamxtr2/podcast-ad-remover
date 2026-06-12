@@ -5,6 +5,7 @@ from app.infra.repository import SubscriptionRepository, EpisodeRepository
 from app.core.feed import FeedManager
 from app.core.processor import Processor
 from app.core.search import PodcastSearcher
+from app.core.notifications import EVENT_NEW_PODCAST, send_notification_async
 from app.web.auth import require_auth
 from pydantic import BaseModel
 import shutil
@@ -50,6 +51,12 @@ async def create_subscription(sub: SubscriptionCreate, initial_count: int = 5, u
         
         # Save to DB
         new_sub = repo.create(sub, title, slug, image_url, description=description, owner_user_id=_real_user_id(user))
+        await send_notification_async(
+            EVENT_NEW_PODCAST,
+            "Podcast added",
+            f"{title} was added to the global podcast library.",
+            severity="success",
+        )
         
         # Trigger initial check
         proc = get_processor()

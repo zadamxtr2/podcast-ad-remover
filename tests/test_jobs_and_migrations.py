@@ -51,14 +51,27 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
     assert "20260609_0002_feed_tokens" in migrations
     assert "20260612_0003_user_podcast_library" in migrations
     assert "20260612_0004_access_request_password_hash" in migrations
+    assert "20260612_0005_notifications" in migrations
 
     with get_db_connection() as conn:
         access_request_columns = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(access_requests)").fetchall()
         }
+        settings_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()
+        }
 
     assert "password_hash" in access_request_columns
+    assert {
+        "notifications_enabled",
+        "notification_urls",
+        "notify_access_requests",
+        "notify_new_podcasts",
+        "notify_episode_downloads",
+        "notify_breaking_errors",
+    }.issubset(settings_columns)
 
 
 def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
@@ -67,7 +80,10 @@ def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
     with get_db_connection() as conn:
         row = conn.execute("""
             SELECT whisper_cpu_threads, ffmpeg_threads, unload_whisper_after_job,
-                   ai_model_cascade, openrouter_model
+                   ai_model_cascade, openrouter_model,
+                   notifications_enabled, notification_urls,
+                   notify_access_requests, notify_new_podcasts,
+                   notify_episode_downloads, notify_breaking_errors
             FROM app_settings WHERE id = 1
         """).fetchone()
 
@@ -80,6 +96,12 @@ def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
     assert "google/gemini-3.5-flash" in row["openrouter_model"]
     assert "google/gemini-3-flash" in row["openrouter_model"]
     assert "google/gemini-3.1-flash-lite" in row["openrouter_model"]
+    assert row["notifications_enabled"] == 0
+    assert row["notification_urls"] is None
+    assert row["notify_access_requests"] == 1
+    assert row["notify_new_podcasts"] == 1
+    assert row["notify_episode_downloads"] == 1
+    assert row["notify_breaking_errors"] == 1
 
 
 def test_database_connections_use_wal_and_busy_timeout(isolated_data_dir):

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added optional Apprise-backed admin notifications for access requests, new podcasts, completed episodes, and breaking processing errors.
 - Split the overloaded admin access page into User Management, Access Requests, and Feed Access pages, and fixed admin user deletion from the UI.
 - Compact admin user/login timestamps and adjust user tables/cards to avoid default horizontal scrolling.
 - Changed access requests so users choose a password during the request; the app stores only the hash and admins no longer need to send temporary passwords.

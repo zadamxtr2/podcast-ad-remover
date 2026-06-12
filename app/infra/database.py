@@ -113,6 +113,17 @@ FORMAL_MIGRATIONS = [
             "ALTER TABLE access_requests ADD COLUMN password_hash TEXT",
         ],
     ),
+    (
+        "20260612_0005_notifications",
+        [
+            "ALTER TABLE app_settings ADD COLUMN notifications_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE app_settings ADD COLUMN notification_urls TEXT",
+            "ALTER TABLE app_settings ADD COLUMN notify_access_requests INTEGER DEFAULT 1",
+            "ALTER TABLE app_settings ADD COLUMN notify_new_podcasts INTEGER DEFAULT 1",
+            "ALTER TABLE app_settings ADD COLUMN notify_episode_downloads INTEGER DEFAULT 1",
+            "ALTER TABLE app_settings ADD COLUMN notify_breaking_errors INTEGER DEFAULT 1",
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000

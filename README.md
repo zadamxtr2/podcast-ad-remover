@@ -46,6 +46,7 @@ The admin queue shows active jobs, queued/retry states, disk usage, next feed ch
 - Optional management login.
 - Optional feed/audio authentication with generated feed tokens.
 - Optional public read-only subscribe page for frictionless podcast-client setup.
+- Optional Apprise-backed admin notifications for access requests, new podcasts, completed episodes, and breaking processing errors.
 - Resource controls for Whisper CPU threads, FFmpeg threads, and unloading Whisper after jobs.
 
 ## Quick Start
@@ -125,6 +126,19 @@ The app supports separate choices for management access and podcast feed access:
 - Feed/audio authentication can be enabled when you want clients to use credentials or generated feed-token URLs.
 
 Protected feed URLs containing `token=` are bearer secrets. Anyone with the full URL can read that feed and download audio until the token is revoked.
+
+## Admin Notifications
+
+Notifications are off by default. Admins can enable them from **Admin > Notifications** by adding one or more Apprise URLs and selecting which events should send alerts.
+
+Initial supported events are:
+
+- user access requested
+- new podcast added to the global library
+- episode processed and available in feeds
+- breaking processing errors, including max-retry failures and top-level worker errors
+
+Apprise supports many targets, including ntfy, Gotify, Pushover, Discord, Telegram, Slack, email/SMTP, webhooks, and SMS providers. Treat notification URLs as secrets because many contain tokens or webhook credentials.
 
 ## Persistent Data
 

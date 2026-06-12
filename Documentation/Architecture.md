@@ -101,6 +101,19 @@ Tokens are stored as SHA-256 hashes in `feed_tokens` and can be listed or revoke
 
 Users requesting dashboard access choose a password during the request. The pending `access_requests` row stores only `password_hash`; admins can approve or deny the request but do not see or transmit the user's password. On approval, the stored hash is copied into the new `users` row.
 
+### Notifications
+
+Admin notifications are optional and disabled by default. Settings are stored in `app_settings` and include a newline-separated list of Apprise URLs plus per-event toggles.
+
+The app currently emits notification events for:
+
+- access requests submitted from `/request-access`;
+- new global podcasts after feed metadata is resolved;
+- completed episodes after processing succeeds and feeds are regenerated;
+- breaking processing errors such as max-retry episode failures, missing subscription rows during processing, and top-level background worker loop errors.
+
+Notification delivery uses the `apprise` Python library directly in the app process. Notification failures are logged and do not block access requests, podcast creation, or episode processing.
+
 ## Data Layout
 
 Persistent data should be mounted at `/data`.

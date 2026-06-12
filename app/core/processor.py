@@ -14,6 +14,11 @@ from app.core.ai_services import Transcriber, AdDetector, RateLimitError
 from app.core.audio import AudioProcessor
 from app.core.rss_gen import RSSGenerator
 from app.core.feed import FeedManager
+from app.core.notifications import (
+    EVENT_BREAKING_ERROR,
+    EVENT_EPISODE_DOWNLOAD,
+    send_notification_async,
+)
 from app.core.url_utils import validate_http_url, validate_redirect_target, is_audio_content_type
 
 logger = logging.getLogger(__name__)
@@ -458,6 +463,12 @@ class Processor:
             if not sub:
                 logger.error(f"Subscription {ep.subscription_id} not found for episode {ep.id}")
                 self.job_repo.fail_running_for_episode(ep_id, "Subscription not found")
+                await send_notification_async(
+                    EVENT_BREAKING_ERROR,
+                    "Episode processing failed",
+                    f"Episode {ep.id} could not be processed because its podcast no longer exists.",
+                    severity="error",
+                )
                 return
 
             # Actually run the processing
@@ -465,6 +476,12 @@ class Processor:
             
         except Exception as e:
             logger.error(f"Fatal error in episode task {ep_id}: {e}")
+            await send_notification_async(
+                EVENT_BREAKING_ERROR,
+                "Episode task crashed",
+                f"Episode task {ep_id} crashed before it could finish: {e}",
+                severity="error",
+            )
         finally:
             # Ensure ID is removed from active set
             Processor._active_task_ids.discard(ep_id)
@@ -968,6 +985,12 @@ class Processor:
             self.rss_gen.generate_unified_feed()
             
             logger.info(f"Successfully processed {ep.title}")
+            await send_notification_async(
+                EVENT_EPISODE_DOWNLOAD,
+                "Episode available",
+                f"{ep.title} from {sub.title} finished processing and is available in the feed.",
+                severity="success",
+            )
 
         except RateLimitError as e:
             # Special handling for API rate limits - wait until quota resets
@@ -1004,6 +1027,12 @@ class Processor:
             else:
                 logger.error(f"Max retries reached for {ep.title}")
                 self.ep_repo.update_status(ep.id, "failed", error=str(e))
+                await send_notification_async(
+                    EVENT_BREAKING_ERROR,
+                    "Episode processing failed",
+                    f"{ep.title} from {sub.title} failed after all retry attempts: {e}",
+                    severity="error",
+                )
 
     def _check_cancellation(self, ep: Episode) -> bool:
         """
@@ -1180,6 +1209,12 @@ class Processor:
                 
             except Exception as e:
                 logger.error(f"Error in background processor loop: {e}")
+                await send_notification_async(
+                    EVENT_BREAKING_ERROR,
+                    "Background processor error",
+                    f"The background processor loop hit an unrecovered error: {e}",
+                    severity="error",
+                )
                 
             # Short sleep to be responsive to new queue items (e.g. Manual Download/Reprocess)
             await asyncio.sleep(10)

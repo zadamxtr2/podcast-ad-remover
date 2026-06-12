@@ -9,6 +9,7 @@ anthropic>=0.18.0
 feedparser>=6.0.10
 pydantic-settings>=2.1.0
 aiofiles>=23.2.0
+apprise>=1.11.0
 
 bcrypt
 itsdangerous

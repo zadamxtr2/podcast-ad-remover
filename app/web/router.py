@@ -6,6 +6,14 @@ from app.core.feed import FeedManager
 from app.core.models import SubscriptionCreate
 from app.core.system_status import get_operation_status
 from app.core.url_utils import validate_http_url
+from app.core.notifications import (
+    EVENT_ACCESS_REQUEST,
+    EVENT_BREAKING_ERROR,
+    EVENT_NEW_PODCAST,
+    send_notification,
+    send_notification_async,
+    send_test_notification,
+)
 from app.web.auth import get_current_user, require_auth, require_admin, log_login_attempt, SESSION_USER_KEY
 from app.web.auth_utils import hash_password, verify_feed_password, verify_password, generate_secure_password, get_client_ip
 from app.web.rate_limiter import login_rate_limiter, check_rate_limit
@@ -383,6 +391,13 @@ async def submit_access_request(
             (username, email, reason, hash_password(password), client_ip)
         )
         conn.commit()
+
+    send_notification(
+        EVENT_ACCESS_REQUEST,
+        "Podcast Ad Remover access request",
+        f"{username} requested dashboard access.",
+        severity="info",
+    )
     
     return templates.TemplateResponse(
         request=request,
@@ -1097,6 +1112,63 @@ async def admin_feed_access(request: Request):
         context=context,
     )
 
+
+@router.get("/admin/notifications", response_class=HTMLResponse)
+async def admin_notifications(request: Request, admin_user = Depends(require_admin)):
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/notifications.html",
+        context=_admin_context(request, "notifications"),
+    )
+
+
+@router.post("/admin/notifications/update")
+async def update_notification_settings(
+    notifications_enabled: bool = Form(False),
+    notification_urls: str = Form(""),
+    notify_access_requests: bool = Form(False),
+    notify_new_podcasts: bool = Form(False),
+    notify_episode_downloads: bool = Form(False),
+    notify_breaking_errors: bool = Form(False),
+    admin_user = Depends(require_admin),
+):
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            UPDATE app_settings
+            SET notifications_enabled = ?,
+                notification_urls = ?,
+                notify_access_requests = ?,
+                notify_new_podcasts = ?,
+                notify_episode_downloads = ?,
+                notify_breaking_errors = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            """,
+            (
+                1 if notifications_enabled else 0,
+                notification_urls.strip(),
+                1 if notify_access_requests else 0,
+                1 if notify_new_podcasts else 0,
+                1 if notify_episode_downloads else 0,
+                1 if notify_breaking_errors else 0,
+            ),
+        )
+        conn.commit()
+
+    return RedirectResponse(url="/admin/notifications?success=Notification+settings+updated", status_code=303)
+
+
+@router.post("/admin/notifications/test")
+async def test_notification_settings(admin_user = Depends(require_admin)):
+    sent = send_test_notification()
+    if sent:
+        return RedirectResponse(url="/admin/notifications?success=Test+notification+sent", status_code=303)
+    return RedirectResponse(
+        url="/admin/notifications?error=Test+notification+could+not+be+sent.+Check+that+notifications+are+enabled+and+the+Apprise+URL+is+valid.",
+        status_code=303,
+    )
+
 @router.post("/admin/users/{user_id}/password")
 async def admin_change_user_password(
     request: Request, 
@@ -1648,6 +1720,13 @@ async def add_subscription(
                         WHERE id = ?
                     """, (title, slug, image_url, description, sub_id))
                     conn.commit()
+
+                await send_notification_async(
+                    EVENT_NEW_PODCAST,
+                    "Podcast added",
+                    f"{title} was added to the global podcast library.",
+                    severity="success",
+                )
                 
                 # Now check feeds and process queue
                 proc = Processor()
@@ -1656,6 +1735,12 @@ async def add_subscription(
                 
             except Exception as e:
                 logger.error(f"Error setting up subscription {sub_id}: {e}")
+                await send_notification_async(
+                    EVENT_BREAKING_ERROR,
+                    "Podcast setup failed",
+                    f"A new podcast could not be set up: {e}",
+                    severity="error",
+                )
         
         background_tasks.add_task(setup_subscription, new_sub.id, feed_url, retention_limit)
         

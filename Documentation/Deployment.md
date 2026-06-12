@@ -61,6 +61,19 @@ Important paths:
 
 Do not delete `/data` unless you intentionally want to remove the app database and downloaded podcasts.
 
+## Notifications
+
+Admin notifications are optional and off by default. Configure them from **Admin > Notifications** after the app is running.
+
+The app embeds the Apprise Python library, so no extra container is required for most setups. Add one Apprise URL per line and use the test button before relying on alerts. Examples of supported targets include:
+
+- ntfy for simple mobile/web push, including self-hosted ntfy servers;
+- Gotify for a self-hosted notification server;
+- Pushover for low-maintenance hosted push;
+- Discord, Telegram, Slack, email/SMTP, and webhook targets.
+
+Notification URLs can contain bearer tokens, webhook IDs, usernames, or passwords. Treat them as deployment secrets and avoid sharing screenshots of the Notifications page.
+
 ## Building From Source
 
 ```bash

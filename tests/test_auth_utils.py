@@ -145,6 +145,8 @@ def test_sensitive_admin_routes_have_route_level_admin_dependency():
     router_source = Path("app/web/router.py").read_text(encoding="utf-8")
     sensitive_handlers = [
         "update_system_settings",
+        "update_notification_settings",
+        "test_notification_settings",
         "update_ai_settings",
         "test_ai_connection",
         "refresh_models",

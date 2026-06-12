@@ -11,7 +11,7 @@ The app itself is small. The heavy parts are:
 
 - FFmpeg and its Debian runtime libraries.
 - `faster-whisper`, CTranslate2, PyAV, tokenizers, and NumPy.
-- Piper TTS, ONNX Runtime, and phonemizer libraries.
+- Piper TTS, ONNX Runtime, and phonemizer libraries when local TTS is installed.
 - Downloaded Whisper and Piper models under `/data/models`.
 - Processed podcast audio under `/data/podcasts`.
 
@@ -79,7 +79,7 @@ Expected hotspots:
 - Whisper/faster-whisper transcription.
 - FFmpeg decoding, cutting, and concatenation.
 - LLM provider requests, mostly waiting on network/API rather than CPU.
-- Piper TTS when title intros or audio summaries are enabled.
+- Piper TTS when title intros or audio summaries are enabled with the local provider. Gemini TTS moves that work to the Gemini API and uses speech quotas instead of local Piper/ONNX runtime.
 
 The app already has a `concurrent_downloads` setting, but that is really processing concurrency. One concurrent job can still fan out into FFmpeg and Whisper internal threads. Small machines should usually use `concurrent_downloads=1`.
 
@@ -98,8 +98,8 @@ The audit branch adds optional controls for `whisper_cpu_threads` and `ffmpeg_th
 1. Measure Whisper reload time on the live container after enabling `Unload Whisper After Jobs`.
 2. Add optional image variants only if image size becomes a real operational problem:
    - `standard`: current full transcription plus Piper support.
-   - `no-tts`: remove Piper and ONNX Runtime for users who do not use audio summaries or title intros.
-   - `experimental-arm64`: Apple Silicon / ARM64 test image using `INSTALL_TTS=0` because Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels.
+   - `no-tts`: remove Piper and ONNX Runtime for users who do not use local audio summaries or title intros.
+   - `experimental-arm64`: Apple Silicon / ARM64 test image using `INSTALL_TTS=0` because Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels. Gemini TTS can still provide spoken summaries/title intros on this image if API quota is available.
    - potentially `external-transcription`: for users who do not want local Whisper.
 3. Add UI controls for existing download guardrails:
    - minimum free disk space

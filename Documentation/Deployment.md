@@ -96,7 +96,7 @@ The default image includes Piper TTS and is intended primarily for `linux/amd64`
 npm run docker:experimental:arm64 -- --push
 ```
 
-This path targets `linux/arm64`, tags the image as `jdcb4/podcast-ad-remover:experimental-arm64`, and sets `INSTALL_TTS=0`. Spoken summaries and title intros are unavailable in that image; podcast download, transcription, ad detection, cutting, feed generation, and the web UI remain the intended test surface.
+This path targets `linux/arm64`, tags the image as `jdcb4/podcast-ad-remover:experimental-arm64`, and sets `INSTALL_TTS=0`. Piper is unavailable in that image, but spoken summaries and title intros can still be tested by selecting Gemini TTS and configuring a Gemini API key. Podcast download, transcription, ad detection, cutting, feed generation, and the web UI remain the intended test surface.
 
 ## Release Publishing
 

@@ -32,7 +32,7 @@ Gemini remains the recommended provider for most homelab installs because the fr
 
 ## 2026-06-12: Keep amd64 primary and make ARM64 experimental without Piper TTS
 
-The default Docker image remains `linux/amd64` with Piper TTS installed. Apple Silicon / ARM64 is useful to test, but Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels. The experimental ARM64 build uses `INSTALL_TTS=0` so the core podcast workflow can be tested without reworking the app around TTS.
+The default Docker image remains `linux/amd64` with Piper TTS installed. Apple Silicon / ARM64 is useful to test, but Piper's phonemizer dependency is not currently simple to install from Linux arm64 wheels. The experimental ARM64 build uses `INSTALL_TTS=0` so the core podcast workflow can be tested without local Piper; Gemini TTS can still provide spoken title intros and summaries when configured.
 
 ## 2026-06-12: Separate global podcast records from user libraries
 
@@ -45,3 +45,7 @@ Access requests should not make admins copy generated passwords back to users. N
 ## 2026-06-12: Use Apprise for optional admin notifications
 
 Notifications should stay optional and provider-agnostic. Embedding the Apprise Python library keeps the app to one container while supporting ntfy, Gotify, Pushover, Discord, email, webhooks, and other targets through configuration rather than provider-specific code.
+
+## 2026-06-12: Keep Piper default while adding optional Gemini TTS
+
+Piper remains the default because it is local, offline, and does not consume API quota. Gemini TTS is available as an optional provider for installs that prefer hosted speech generation or experimental images without Piper. It reuses Gemini API keys, has its own TTS model cascade, and keeps text-analysis model settings separate from voice settings in the admin UI.

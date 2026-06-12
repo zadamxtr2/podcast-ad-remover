@@ -40,26 +40,48 @@
 
 <form action="/admin/ai/update" method="POST" id="aiForm">
     <div class="space-y-8">
-        <!-- Models -->
+        <!-- Transcription -->
         <div>
-            <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Core Models</h4>
-            <div class="grid grid-cols-1 gap-6">
-                <!-- Whisper -->
+            <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Transcription</h4>
+            <label class="block text-sm font-medium text-text-secondary mb-2">Whisper Model</label>
+            <select name="whisper_model" class="select">
+                {% for model in ['tiny', 'base', 'small', 'medium', 'large'] %}
+                <option value="{{ model }}" {% if settings.whisper_model==model %}selected{% endif %}>
+                    {{ model|title }} {% if model == 'base' %}(Default){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Voice Provider -->
+        <div>
+            <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Voice And TTS</h4>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div>
-                    <label class="block text-sm font-medium text-text-secondary mb-2">Whisper Model
-                        (Transcription)</label>
-                    <select name="whisper_model" class="select">
-                        {% for model in ['tiny', 'base', 'small', 'medium', 'large'] %}
-                        <option value="{{ model }}" {% if settings.whisper_model==model %}selected{% endif %}>
-                            {{ model|title }} {% if model == 'base' %}(Default){% endif %}
+                    <label class="block text-sm font-medium text-text-secondary mb-2">TTS Provider</label>
+                    <select name="tts_provider" class="select">
+                        <option value="piper" {% if (settings.tts_provider or 'piper')=='piper' %}selected{% endif %}>
+                            Piper (Local, Default)
+                        </option>
+                        <option value="gemini" {% if settings.tts_provider=='gemini' %}selected{% endif %}>
+                            Gemini TTS
+                        </option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-2">Gemini TTS Voice</label>
+                    <select name="gemini_tts_voice" class="select">
+                        {% for voice in ['Orus', 'Enceladus', 'Laomedeia'] %}
+                        <option value="{{ voice }}" {% if (settings.gemini_tts_voice or 'Orus')==voice %}selected{% endif %}>
+                            {{ voice }} {% if voice == 'Orus' %}(Default){% endif %}
                         </option>
                         {% endfor %}
                     </select>
                 </div>
 
-                <!-- Piper -->
-                <div>
-                    <label class="block text-sm font-medium text-text-secondary mb-2">Piper Voice (TTS)</label>
+                <div class="lg:col-span-2">
+                    <label class="block text-sm font-medium text-text-secondary mb-2">Piper Voice</label>
                     <select name="piper_model" class="select">
                         <option value="en_GB-cori-high.onnx" {% if settings.piper_model=='en_GB-cori-high.onnx'
                             %}selected{% endif %}>Cori (High Quality) - UK English</option>
@@ -72,11 +94,14 @@
                     </select>
                 </div>
             </div>
+            <p class="text-xs text-text-muted mt-3">Gemini TTS uses the saved Gemini API keys. Current free-tier limits for each configured TTS model are 3 RPM, 10K TPM, and 10 RPD.</p>
+            {{ shuttle_ui('gemini_tts', 'Gemini TTS Model Cascade', 'gemini_tts_model_cascade',
+            settings.gemini_tts_model_cascade | tojson) }}
         </div>
 
         <!-- AI Provider Selection -->
         <div>
-            <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">AI Provider</h4>
+            <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Text Analysis Provider</h4>
             <select name="active_ai_provider" id="providerSelect" class="select mb-4"
                 onchange="toggleProviderSettings()">
                 <option value="gemini" {% if settings.active_ai_provider=='gemini' %}selected{% endif %}>Google Gemini
@@ -182,6 +207,7 @@
 <script nonce="{{ csp_nonce }}">
     const DEFAULTS = {
         'gemini': ['gemini-3.5-flash', 'gemini-3-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+        'gemini_tts': ['gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'],
         'openai': ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
         'anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
         'openrouter': ['google/gemini-3.5-flash', 'google/gemini-3-flash', 'google/gemini-3.1-flash-lite', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite']
@@ -332,6 +358,7 @@
     toggleProviderSettings();
 
     shuttleManager.init('gemini', {{ settings.ai_model_cascade | tojson }});
+    shuttleManager.init('gemini_tts', {{ settings.gemini_tts_model_cascade | tojson }});
     shuttleManager.init('openai', {{ settings.openai_model | tojson }});
     shuttleManager.init('anthropic', {{ settings.anthropic_model | tojson }});
     shuttleManager.init('openrouter', {{ settings.openrouter_model | tojson }});

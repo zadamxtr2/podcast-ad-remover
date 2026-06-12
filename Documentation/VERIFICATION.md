@@ -115,7 +115,7 @@ The helper refuses `latest` and SemVer-looking tags.
 npm run docker:experimental:arm64 -- --push
 ```
 
-This publishes `jdcb4/podcast-ad-remover:experimental-arm64` when pushed. It passes `INSTALL_TTS=0`, so Piper TTS is not installed. Spoken summaries and title intros require a TTS-enabled image; the ARM64 experimental target is intended to test the core podcast download, transcription, ad detection, cutting, feed, and web UI path.
+This publishes `jdcb4/podcast-ad-remover:experimental-arm64` when pushed. It passes `INSTALL_TTS=0`, so Piper TTS is not installed. Spoken summaries and title intros can still be tested with Gemini TTS when a Gemini API key is configured; the ARM64 experimental target is intended to test the core podcast download, transcription, ad detection, cutting, feed, and web UI path.
 
 ## Current Gaps
 

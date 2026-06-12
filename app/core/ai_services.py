@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import asyncio
@@ -5,6 +6,7 @@ import os
 import sys
 import gc
 import importlib.util
+import wave
 from typing import List, Dict
 from app.core.config import settings
 import httpx
@@ -434,6 +436,7 @@ class AnthropicProvider(LLMProvider):
 
 class AdDetector:
     GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    GEMINI_REST_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
     # Default Gemini Cascade
     DEFAULT_GEMINI_MODELS = [
@@ -450,6 +453,11 @@ class AdDetector:
         'google/gemini-2.5-flash',
         'google/gemini-2.5-flash-lite',
     ]
+    DEFAULT_GEMINI_TTS_MODELS = [
+        'gemini-3.1-flash-tts-preview',
+        'gemini-2.5-flash-preview-tts',
+    ]
+    GEMINI_TTS_VOICES = {'Orus', 'Enceladus', 'Laomedeia'}
 
     def __init__(self):
         self.settings = self._load_settings()
@@ -475,6 +483,30 @@ class AdDetector:
         except json.JSONDecodeError:
             # Fallback: Treat as simple string (legacy)
             return [value]
+
+    def _get_gemini_api_keys(self) -> List[str]:
+        api_keys = []
+
+        db_keys_json = self.settings.get('gemini_api_keys')
+        if db_keys_json:
+            try:
+                parsed = json.loads(db_keys_json)
+                if isinstance(parsed, list):
+                    api_keys.extend([k.strip() for k in parsed if isinstance(k, str) and k.strip()])
+            except Exception:
+                pass
+
+        legacy_key = self.settings.get('gemini_api_key')
+        if legacy_key and legacy_key not in api_keys:
+            api_keys.append(legacy_key)
+
+        if settings.GEMINI_API_KEY:
+            env_keys = [k.strip() for k in settings.GEMINI_API_KEY.split(',') if k.strip()]
+            for key in env_keys:
+                if key not in api_keys:
+                    api_keys.append(key)
+
+        return api_keys
 
     def create_provider(self, provider_type: str, api_key: str = None, model: str = None, openrouter_key: str = None) -> LLMProvider:
         """Factory to create a provider instance."""
@@ -869,10 +901,113 @@ Example: [{"start": 10.0, "end": 300.0, "label": "Content", "reason": "Main disc
 
         return False
 
+    def _clean_tts_text(self, text: str) -> str:
+        text = text or ""
+        chars_to_remove = ['"', '*', '_', '#', '\u201c', '\u201d', '\u2018', '\u2019']
+        for char in chars_to_remove:
+            text = text.replace(char, '')
+        return text.strip()
+
+    def _extract_gemini_tts_audio(self, payload: Dict) -> bytes:
+        candidates = payload.get("candidates") or []
+        for candidate in candidates:
+            content = candidate.get("content") or {}
+            for part in content.get("parts") or []:
+                inline_data = part.get("inlineData") or part.get("inline_data") or {}
+                data = inline_data.get("data")
+                if data:
+                    if isinstance(data, bytes):
+                        return data
+                    return base64.b64decode(data)
+        raise RuntimeError("Gemini TTS response did not contain audio data.")
+
+    def _write_pcm_wav(self, output_path: str, pcm_audio: bytes):
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        with wave.open(output_path, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(24000)
+            wav_file.writeframes(pcm_audio)
+
+    async def _generate_gemini_tts(self, text: str, output_path: str):
+        api_keys = self._get_gemini_api_keys()
+        if not api_keys:
+            raise RuntimeError("Gemini TTS selected but no Gemini API key is configured.")
+
+        models = self._parse_model_setting(
+            self.settings.get("gemini_tts_model_cascade"),
+            self.DEFAULT_GEMINI_TTS_MODELS,
+        )
+        models = [model for model in models if model]
+        if not models:
+            models = self.DEFAULT_GEMINI_TTS_MODELS
+
+        voice = self.settings.get("gemini_tts_voice") or "Orus"
+        if voice not in self.GEMINI_TTS_VOICES:
+            logger.warning(f"Unknown Gemini TTS voice '{voice}', falling back to Orus.")
+            voice = "Orus"
+
+        payload = {
+            "contents": [{"parts": [{"text": text}]}],
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": voice}
+                    }
+                },
+            },
+        }
+
+        last_error = None
+        async with httpx.AsyncClient(timeout=120) as client:
+            for model in models:
+                url = f"{self.GEMINI_REST_BASE_URL}/models/{model}:generateContent"
+                for key_idx, api_key in enumerate(api_keys):
+                    try:
+                        logger.info(f"Generating TTS with Gemini model {model}, key #{key_idx + 1}.")
+                        response = await client.post(
+                            url,
+                            headers={
+                                "x-goog-api-key": api_key,
+                                "Content-Type": "application/json",
+                            },
+                            json=payload,
+                        )
+                        if response.status_code >= 400:
+                            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:500]}")
+
+                        audio = self._extract_gemini_tts_audio(response.json())
+                        self._write_pcm_wav(output_path, audio)
+                        logger.info("Gemini TTS generation completed.")
+                        return
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(f"Gemini TTS model {model} failed with key #{key_idx + 1}: {e}")
+
+        raise RuntimeError(f"All Gemini TTS models failed. Last error: {last_error}")
+
     async def validate_tts(self):
         """
         Check if TTS service is available and model is ready.
         """
+        self.settings = self._load_settings()
+        tts_provider = self.settings.get("tts_provider") or "piper"
+        if tts_provider == "gemini":
+            if not self._get_gemini_api_keys():
+                raise RuntimeError("Gemini TTS is selected but no Gemini API key is configured.")
+            models = self._parse_model_setting(
+                self.settings.get("gemini_tts_model_cascade"),
+                self.DEFAULT_GEMINI_TTS_MODELS,
+            )
+            if not models:
+                raise RuntimeError("Gemini TTS is selected but no TTS models are configured.")
+            logger.info("Gemini TTS validation skipped live API call to avoid consuming speech quota.")
+            return True
+
         if not piper_tts_available():
             raise RuntimeError("Piper TTS is not installed or is disabled in this image.")
 
@@ -916,9 +1051,19 @@ Example: [{"start": 10.0, "end": 300.0, "label": "Content", "reason": "Main disc
 
     async def generate_audio(self, text: str, output_path: str):
         """
-        Generate TTS audio using local system TTS (offline).
-        Uses app/core/tts_worker.py in a separate process to avoid stability issues.
+        Generate TTS audio using the configured TTS provider.
         """
+        self.settings = self._load_settings()
+        text = self._clean_tts_text(text)
+        if not text:
+            raise RuntimeError("Cannot generate TTS for empty text.")
+
+        tts_provider = self.settings.get("tts_provider") or "piper"
+        if tts_provider == "gemini":
+            logger.info("Generating TTS (Gemini)...")
+            await self._generate_gemini_tts(text, output_path)
+            return
+
         if not piper_tts_available():
             raise RuntimeError("Piper TTS is not installed or is disabled in this image.")
 

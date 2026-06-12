@@ -8,6 +8,7 @@ from app.core.config import settings
 
 DEFAULT_GEMINI_MODEL_CASCADE = '["gemini-3.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]'
 DEFAULT_OPENROUTER_MODEL_CASCADE = '["google/gemini-3.5-flash", "google/gemini-3-flash", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"]'
+DEFAULT_GEMINI_TTS_MODEL_CASCADE = '["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]'
 
 
 FORMAL_MIGRATIONS = [
@@ -122,6 +123,14 @@ FORMAL_MIGRATIONS = [
             "ALTER TABLE app_settings ADD COLUMN notify_new_podcasts INTEGER DEFAULT 1",
             "ALTER TABLE app_settings ADD COLUMN notify_episode_downloads INTEGER DEFAULT 1",
             "ALTER TABLE app_settings ADD COLUMN notify_breaking_errors INTEGER DEFAULT 1",
+        ],
+    ),
+    (
+        "20260612_0006_tts_provider_settings",
+        [
+            "ALTER TABLE app_settings ADD COLUMN tts_provider TEXT DEFAULT 'piper'",
+            "ALTER TABLE app_settings ADD COLUMN gemini_tts_voice TEXT DEFAULT 'Orus'",
+            "ALTER TABLE app_settings ADD COLUMN gemini_tts_model_cascade TEXT DEFAULT '[\"gemini-3.1-flash-tts-preview\", \"gemini-2.5-flash-preview-tts\"]'",
         ],
     ),
 ]
@@ -456,6 +465,16 @@ Transcript Context: {transcript_context}""",))
     """, (DEFAULT_OPENROUTER_MODEL_CASCADE,))
 
     _apply_formal_migrations(conn, create_backup=db_existed)
+
+    cursor.execute("""
+        UPDATE app_settings
+        SET gemini_tts_model_cascade = ?
+        WHERE id = 1
+          AND (
+              gemini_tts_model_cascade IS NULL
+              OR gemini_tts_model_cascade = ''
+          )
+    """, (DEFAULT_GEMINI_TTS_MODEL_CASCADE,))
 
     conn.commit()
     conn.close()

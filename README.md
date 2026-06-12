@@ -40,7 +40,7 @@ The admin queue shows active jobs, queued/retry states, disk usage, next feed ch
 - LLM-based ad, promo, intro, and outro detection.
 - FFmpeg-based audio cutting and rewritten RSS feed generation.
 - Per-podcast feeds plus a unified feed.
-- Optional AI episode summaries and spoken title intros.
+- Optional AI episode summaries and spoken title intros using either local Piper TTS or Gemini TTS.
 - Durable SQLite-backed processing jobs with retry and rate-limit states.
 - Admin queue/operations dashboard.
 - Optional management login.
@@ -116,6 +116,17 @@ You can set keys in the Admin UI or with environment variables:
 - `ANTHROPIC_API_KEY`
 - `OPENROUTER_API_KEY`
 
+## Text-To-Speech
+
+Piper remains the default TTS provider because it is local and does not consume API quota. Admins can optionally switch spoken title intros and audio summaries to Gemini TTS from **Admin > AI Configuration**.
+
+Gemini TTS uses the saved Gemini API keys and this default fallback order:
+
+1. `gemini-3.1-flash-tts-preview`
+2. `gemini-2.5-flash-preview-tts`
+
+Available Gemini voices are `Orus` (default), `Enceladus`, and `Laomedeia`. Current free-tier limits recorded for each Gemini TTS model are 3 RPM, 10K TPM, and 10 RPD.
+
 ## Authentication And Feed Access
 
 The app supports separate choices for management access and podcast feed access:
@@ -179,7 +190,7 @@ Experimental Apple Silicon / ARM64 images can be built without Piper TTS:
 npm run docker:experimental:arm64 -- --push
 ```
 
-`linux/amd64` remains the primary release target. The ARM64 experimental image skips Piper because its phonemizer dependency is not currently available as a simple Linux arm64 wheel. Podcast download, local transcription, ad detection, cutting, feeds, and the web UI remain the target feature set; spoken summaries and title intros require a TTS-enabled image.
+`linux/amd64` remains the primary release target. The ARM64 experimental image skips Piper because its phonemizer dependency is not currently available as a simple Linux arm64 wheel. Podcast download, local transcription, ad detection, cutting, feeds, and the web UI remain the target feature set. Spoken summaries and title intros can still be tested on no-Piper images by selecting Gemini TTS and configuring a Gemini API key.
 
 Release publishing is explicit and tags both the version and `latest`:
 

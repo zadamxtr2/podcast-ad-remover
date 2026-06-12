@@ -644,6 +644,9 @@ async def update_ai_settings(
     whisper_model: str = Form("base"),
     ai_model_cascade: str = Form(...),
     piper_model: str = Form("en_GB-cori-high.onnx"),
+    tts_provider: str = Form("piper"),
+    gemini_tts_voice: str = Form("Orus"),
+    gemini_tts_model_cascade: str = Form('["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]'),
     active_ai_provider: str = Form("gemini"),
     openai_api_key: str = Form(None),
     anthropic_api_key: str = Form(None),
@@ -660,6 +663,18 @@ async def update_ai_settings(
         json.loads(ai_model_cascade)
     except:
         ai_model_cascade = '["gemini-3.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]'
+
+    try:
+        parsed_tts_models = json.loads(gemini_tts_model_cascade)
+        if not isinstance(parsed_tts_models, list):
+            raise ValueError("Gemini TTS cascade must be a list")
+    except:
+        gemini_tts_model_cascade = '["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]'
+
+    if tts_provider not in {"piper", "gemini"}:
+        tts_provider = "piper"
+    if gemini_tts_voice not in {"Orus", "Enceladus", "Laomedeia"}:
+        gemini_tts_voice = "Orus"
     
     # Validate gemini_api_keys is valid JSON array
     if gemini_api_keys:
@@ -678,6 +693,9 @@ async def update_ai_settings(
             SET whisper_model = ?,
                 ai_model_cascade = ?,
                 piper_model = ?,
+                tts_provider = ?,
+                gemini_tts_voice = ?,
+                gemini_tts_model_cascade = ?,
                 active_ai_provider = ?,
                 openai_api_key = ?,
                 anthropic_api_key = ?,
@@ -689,7 +707,9 @@ async def update_ai_settings(
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
         """, (
-            whisper_model, ai_model_cascade, piper_model, active_ai_provider,
+            whisper_model, ai_model_cascade, piper_model,
+            tts_provider, gemini_tts_voice, gemini_tts_model_cascade,
+            active_ai_provider,
             openai_api_key, anthropic_api_key, openrouter_api_key, gemini_api_keys,
             openai_model, anthropic_model, openrouter_model
         ))
@@ -724,6 +744,8 @@ async def test_ai_connection(
 async def refresh_models(provider: str, admin_user = Depends(require_admin)):
     try:
         from app.core.ai_services import AdDetector
+        if provider == "gemini_tts":
+            return {"models": AdDetector.DEFAULT_GEMINI_TTS_MODELS}
         detector = AdDetector()
         # Create provider using saved settings (implies user must save key first usually, 
         # but we could allow passing key in query param if we wanted to be fancy. 

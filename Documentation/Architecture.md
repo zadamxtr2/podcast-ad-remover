@@ -15,6 +15,7 @@ The application is intentionally simple: one web app, one SQLite database, local
 - FFmpeg for audio processing.
 - Whisper/faster-whisper for local transcription.
 - Gemini, OpenAI, Anthropic, or OpenRouter for LLM-backed segment detection and summaries.
+- Piper or Gemini TTS for optional spoken title intros and audio summaries.
 - Tailwind CSS for styling.
 - Docker for deployment.
 
@@ -43,9 +44,18 @@ Key areas:
 
 Supporting modules include:
 - `app/core/audio.py`: FFmpeg helpers.
-- `app/core/ai_services.py`: provider integrations, transcription, and summaries.
+- `app/core/ai_services.py`: provider integrations, transcription, summaries, and TTS.
 - `app/core/rss_gen.py`: generated feed output.
 - `app/core/feed.py`: feed parsing.
+
+### Text-To-Speech
+
+TTS is only used for optional spoken title intros and audio summaries. `app_settings.tts_provider` selects the engine:
+
+- `piper`: default local/offline provider. It uses the configured `piper_model` and stores downloaded voice models under `/data/models/piper`.
+- `gemini`: optional API-backed provider. It reuses saved Gemini API keys, sends speech requests through Google's REST `generateContent` endpoint, tries `gemini_tts_model_cascade` in order, and writes returned 24 kHz mono PCM as a WAV file for FFmpeg.
+
+The currently exposed Gemini voices are `Orus`, `Enceladus`, and `Laomedeia`.
 
 ### Infrastructure
 

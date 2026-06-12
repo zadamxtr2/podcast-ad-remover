@@ -8,6 +8,7 @@ Podcast Ad Remover downloads podcast episodes, processes them to remove ads or p
 - FFmpeg for audio cutting and concatenation.
 - Whisper/faster-whisper for local transcription.
 - Gemini, OpenAI, Anthropic, and OpenRouter for LLM-based segment detection.
+- Piper or Gemini TTS for optional spoken title intros and audio summaries.
 - Apprise for optional admin notifications.
 - Tailwind CSS compiled with npm.
 - Docker for normal deployment.

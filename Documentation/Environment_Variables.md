@@ -37,6 +37,20 @@ Current Gemini free-tier limits recorded for these defaults:
 | Gemini 3.1 Flash Lite | Text-out models | 15 | 250K | 500 |
 | Gemini 3.5 Flash | Text-out models | 5 | 250K | 20 |
 
+Gemini TTS is optional and uses the same saved Gemini API keys. The default TTS cascade is:
+
+1. `gemini-3.1-flash-tts-preview`
+2. `gemini-2.5-flash-preview-tts`
+
+Available Gemini TTS voices are `Orus` (default), `Enceladus`, and `Laomedeia`.
+
+Current free-tier limits recorded for Gemini TTS:
+
+| Model | Category | RPM | TPM | RPD |
+|-------|----------|-----|-----|-----|
+| Gemini 3.1 Flash TTS | Text-to-speech models | 3 | 10K | 10 |
+| Gemini 2.5 Flash TTS | Text-to-speech models | 3 | 10K | 10 |
+
 ## Optional / Defaults
 
 | Variable | Description | Default |
@@ -67,6 +81,9 @@ These are configured from the Admin UI rather than environment variables:
 | `whisper_cpu_threads` | Faster-Whisper CPU thread cap. `0` uses the library default. | `0` |
 | `ffmpeg_threads` | FFmpeg thread cap. `0` lets FFmpeg choose automatically. | `0` |
 | `unload_whisper_after_job` | Unload the local Whisper model after the queue empties to reduce idle RAM. | `0` |
+| `tts_provider` | TTS engine for spoken title intros and audio summaries: `piper` or `gemini`. | `piper` |
+| `gemini_tts_voice` | Gemini TTS voice when `tts_provider=gemini`. | `Orus` |
+| `gemini_tts_model_cascade` | JSON array of Gemini TTS models to try in order. | `["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]` |
 | `notifications_enabled` | Enable Apprise-backed admin notifications. | `0` |
 | `notification_urls` | Newline-separated Apprise URLs. Treat values as secrets because they can contain tokens or webhooks. | empty |
 | `notify_access_requests` | Send notification when a user requests dashboard access. | `1` |

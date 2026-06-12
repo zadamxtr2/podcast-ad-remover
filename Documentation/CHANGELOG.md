@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.0 - 2026-06-12
+
 - Split Admin AI Configuration into separate Transcription, Voice and TTS, and Text Analysis pages under a new AI Settings sidebar group.
 - Reorganized admin navigation into AI Settings, Podcast Preferences, System, and User Management groups.
 - Moved Whitelist Mode from System Settings to Global Settings.

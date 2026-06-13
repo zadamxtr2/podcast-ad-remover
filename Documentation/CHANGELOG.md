@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed GitHub Actions verification by installing the async pytest plugin in CI and moving the workflow's Node runtime to 24.
+
 ## 1.4.1 - 2026-06-13
 
 - Added queue self-repair, FFmpeg operation timeouts, and running-job heartbeats so missing job rows, stuck audio operations, or orphaned running jobs do not hold the processing queue indefinitely.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.1 - 2026-06-13
+
 - Added queue self-repair, FFmpeg operation timeouts, and running-job heartbeats so missing job rows, stuck audio operations, or orphaned running jobs do not hold the processing queue indefinitely.
 
 ## 1.4.0 - 2026-06-12

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fixed GitHub Actions verification by installing the async pytest plugin in CI and moving the workflow's Node runtime to 24.
+- Fixed GitHub Actions verification by installing the async pytest plugin in CI and updating the workflow to Node 24-compatible GitHub action versions.
 
 ## 1.4.1 - 2026-06-13
 

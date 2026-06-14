@@ -119,35 +119,14 @@
                     </div>
                     <div class="h-10 w-px bg-white/10 hidden md:block"></div>
                     <div class="flex gap-2 flex-wrap justify-center md:justify-start">
-                        <a href="{{ links.direct }}" class="btn-secondary px-4 py-2 text-sm font-medium rounded-full"
-                            title="Direct RSS Feed" target="_blank">
-                            Direct link
-                        </a>
-                        <a href="pktc://subscribe/{{ links.direct | urlencode }}"
+                        {% for link in links.app_links %}
+                        <a href="{{ link.url }}"
                             class="btn-secondary px-4 py-2 text-sm font-medium rounded-full"
-                            title="Subscribe on Pocket Casts" target="_blank">
-                            Pocket Casts
+                            {% if link.target %}target="{{ link.target }}"{% endif %}
+                            title="{% if link.key == 'direct' %}Direct RSS Feed{% else %}Subscribe on {{ link.label }}{% endif %}">
+                            {{ link.label }}
                         </a>
-                        <a href="/subscribe/apple?url={{ links.apple | urlencode }}"
-                            class="btn-secondary px-4 py-2 text-sm font-medium rounded-full"
-                            title="Subscribe on Apple Podcasts" target="_blank">
-                            Apple
-                        </a>
-                        <a href="overcast://x-callback-url/add?url={{ links.direct | urlencode }}"
-                            class="btn-secondary px-4 py-2 text-sm font-medium rounded-full"
-                            title="Subscribe on Overcast" target="_blank">
-                            Overcast
-                        </a>
-                        <a href="https://castbox.fm/vic/{{ links.direct | urlencode }}"
-                            class="btn-secondary px-4 py-2 text-sm font-medium rounded-full"
-                            title="Subscribe on Castbox" target="_blank">
-                            Castbox
-                        </a>
-                        <a href="podcastaddict://subscribe/{{ links.direct | urlencode }}"
-                            class="btn-secondary px-4 py-2 text-sm font-medium rounded-full"
-                            title="Subscribe on Podcast Addict" target="_blank">
-                            Podcast Addict
-                        </a>
+                        {% endfor %}
                     </div>
                     {% if settings.enable_feed_auth %}
                     <p class="basis-full text-xs text-amber-300/80 text-center md:text-left max-w-2xl">

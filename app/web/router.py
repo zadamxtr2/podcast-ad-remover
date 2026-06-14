@@ -17,6 +17,7 @@ from app.core.notifications import (
 from app.web.auth import get_current_user, require_auth, require_admin, log_login_attempt, SESSION_USER_KEY
 from app.web.auth_utils import hash_password, verify_feed_password, verify_password, generate_secure_password, get_client_ip
 from app.web.rate_limiter import login_rate_limiter, check_rate_limit
+from app.web.subscription_links import build_subscribe_instruction_context, build_subscription_links
 from app.web.template_filters import compact_datetime
 from app.web.template_filters import clean_description as safe_clean_description
 from app.web.template_filters import simple_markdown as safe_simple_markdown
@@ -95,7 +96,6 @@ def _can_manage_subscription(user, sub) -> bool:
 from app.core.utils import get_app_base_url
 
 
-
 def generate_rss_links(request: Request, sub, global_settings: dict, user_obj=None, include_auth_token: bool = True):
     """Consolidated logic for generating RSS links with optional auth injection."""
     base_url = get_app_base_url(global_settings, request)
@@ -112,16 +112,7 @@ def generate_rss_links(request: Request, sub, global_settings: dict, user_obj=No
             separator = "&" if "?" in rss_url else "?"
             rss_url = f"{rss_url}{separator}token={token}"
 
-
-    return {
-        "rss": rss_url,
-        "direct": rss_url,
-        "apple": rss_url,  # Method 1: Direct HTTPS URL for manual "Follow a Show by URL"
-        "pocket_casts": f"pktc://subscribe/{rss_url}",
-        "overcast": f"overcast://x-callback-url/add?url={rss_url}",
-        "castbox": f"castbox://subscribe?url={rss_url}",
-        "podcast_addict": f"podcastaddict://subscribe/{rss_url}"
-    }
+    return build_subscription_links(rss_url)
 
 # Helper to get pending access requests count for sidebar badge
 def get_pending_requests_count():
@@ -1068,14 +1059,31 @@ async def admin_logs(request: Request, lines: int = 1000, level: str = "ALL"):
 @router.get("/subscribe/apple", response_class=HTMLResponse)
 async def apple_subscribe_page(request: Request, url: str):
     """Render the Apple Podcasts subscription instruction page."""
+    context = build_subscribe_instruction_context("apple", url)
     return templates.TemplateResponse(
         request=request,
-        name="apple_subscribe.html",
+        name="subscribe_instructions.html",
         context={
             "csp_nonce": get_csp_nonce(request),
-            "feed_url": url
-        }
+            "client": context,
+        },
     )
+
+
+@router.get("/subscribe/{client_key}", response_class=HTMLResponse)
+async def subscribe_instruction_page(request: Request, client_key: str, url: str):
+    context = build_subscribe_instruction_context(client_key, url)
+    if not context:
+        raise HTTPException(status_code=404, detail="Subscription client not found")
+    return templates.TemplateResponse(
+        request=request,
+        name="subscribe_instructions.html",
+        context={
+            "csp_nonce": get_csp_nonce(request),
+            "client": context,
+        },
+    )
+
 
 def _admin_context(request: Request, active_tab: str) -> dict:
     settings = get_global_settings()
@@ -1536,15 +1544,7 @@ def _render_index(request: Request, error: str = None):
                 rss_url = f"{rss_url}{separator}token={token}"
 
 
-        unified_links = {
-            "rss": rss_url,
-            "direct": rss_url,
-            "apple": rss_url,  # Method 1: Direct HTTPS URL
-            "pocket_casts": f"pktc://subscribe/{rss_url}",
-            "overcast": f"overcast://x-callback-url/add?url={rss_url}",
-            "castbox": f"castbox://subscribe?url={rss_url}",
-            "podcast_addict": f"podcastaddict://subscribe/{rss_url}"
-        }
+        unified_links = build_subscription_links(rss_url)
 
     return templates.TemplateResponse(
         request=request,
@@ -1597,15 +1597,7 @@ def _build_public_subscribe_context(request: Request, global_settings: dict):
     if subs:
         base_url = get_app_base_url(global_settings, request)
         rss_url = f"{base_url}/feed/unified.xml"
-        unified_links = {
-            "rss": rss_url,
-            "direct": rss_url,
-            "apple": rss_url,
-            "pocket_casts": f"pktc://subscribe/{rss_url}",
-            "overcast": f"overcast://x-callback-url/add?url={rss_url}",
-            "castbox": f"castbox://subscribe?url={rss_url}",
-            "podcast_addict": f"podcastaddict://subscribe/{rss_url}",
-        }
+        unified_links = build_subscription_links(rss_url)
 
     feed_auth_enabled = str(global_settings.get("enable_feed_auth")).lower() in ("1", "true", "yes", "on")
 

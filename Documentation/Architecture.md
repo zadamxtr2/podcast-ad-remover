@@ -109,6 +109,8 @@ RSS feeds and audio files remain public when feed authentication is disabled. Wh
 
 Tokens are stored as SHA-256 hashes in `feed_tokens` and can be listed or revoked from the admin Feed Access page. Basic Auth and the older `?auth=base64(username:password)` format are still accepted for compatibility with existing podcast-client subscriptions.
 
+Dashboard and public subscribe pages build podcast-client links through one server-side helper so tokenized feed URLs are encoded consistently. Direct RSS and Overcast links are emitted directly. Apple, Pocket Casts, Castbox, and Podcast Addict route through local instruction pages; Pocket Casts, Castbox, and Podcast Addict include a clearly labelled best-effort app link before the manual RSS instructions.
+
 ### Access Requests
 
 Users requesting dashboard access choose a password during the request. The pending `access_requests` row stores only `password_hash`; admins can approve or deny the request but do not see or transmit the user's password. On approval, the stored hash is copied into the new `users` row.

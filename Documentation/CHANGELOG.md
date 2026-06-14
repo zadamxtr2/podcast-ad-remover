@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.5.0 - 2026-06-14
+
 - Fixed GitHub Actions verification by installing the async pytest plugin in CI and updating the workflow to Node 24-compatible GitHub action versions.
 - Added admin podcast owner reassignment from the podcast detail page.
 

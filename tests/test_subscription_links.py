@@ -67,3 +67,12 @@ def test_apple_instruction_context_has_no_best_effort_link():
 
     assert context["label"] == "Apple"
     assert context["best_effort_url"] is None
+
+
+def test_subscribe_instruction_copy_button_does_not_claim_success_on_failed_fallback():
+    template = open("app/web/templates/subscribe_instructions.html", encoding="utf-8").read()
+
+    assert "copied = document.execCommand('copy')" in template
+    assert "if (copied)" in template
+    assert "showCopyFailure()" in template
+    assert "Could not copy automatically" in template

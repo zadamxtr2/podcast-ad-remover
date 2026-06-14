@@ -36,14 +36,16 @@
                 <h3 class="text-lg font-semibold text-gray-800 mb-2">1. Copy your Feed URL</h3>
                 <div class="flex gap-2">
                     <input type="text" value="{{ client.feed_url }}" readonly
+                        id="feedUrl"
                         class="flex-1 p-3 bg-gray-50 border border-gray-300 rounded-md font-mono text-sm text-gray-600 select-all"
-                        onclick="this.select()">
+                        onclick="selectFeedUrl()">
                     <button onclick="copyUrl()" id="copyBtn"
                         class="bg-purple-600 text-white px-6 py-2 rounded-md font-medium hover:bg-purple-700 transition-colors flex items-center gap-2">
                         <span id="btnText">Copy</span>
                     </button>
                 </div>
                 <p id="copyFeedback" class="text-green-600 text-sm mt-2 hidden font-medium">Copied to clipboard.</p>
+                <p id="copyError" class="text-amber-700 text-sm mt-2 hidden font-medium">Could not copy automatically. The URL is selected; use your browser's Copy action.</p>
             </div>
 
             <div class="mb-8">
@@ -71,31 +73,74 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
-    function copyUrl() {
-        const urlField = document.querySelector('input[type="text"]');
+    function selectFeedUrl() {
+        const urlField = document.getElementById('feedUrl');
+        urlField.removeAttribute('readonly');
+        urlField.focus();
         urlField.select();
         urlField.setSelectionRange(0, 99999);
-
-        navigator.clipboard.writeText(urlField.value).then(function () {
-            showFeedback();
-        }, function (err) {
-            console.error('Async: Could not copy text: ', err);
-            document.execCommand("copy");
-            showFeedback();
-        });
+        urlField.setAttribute('readonly', 'readonly');
     }
 
-    function showFeedback() {
+    async function copyUrl() {
+        const urlField = document.getElementById('feedUrl');
+        hideCopyMessages();
+
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(urlField.value);
+                showCopySuccess();
+                return;
+            }
+        } catch (err) {
+            console.warn('Clipboard API copy failed:', err);
+        }
+
+        selectFeedUrl();
+        let copied = false;
+        try {
+            copied = document.execCommand('copy');
+        } catch (err) {
+            console.warn('Fallback copy failed:', err);
+        }
+
+        if (copied) {
+            showCopySuccess();
+        } else {
+            showCopyFailure();
+        }
+    }
+
+    function hideCopyMessages() {
+        document.getElementById('copyFeedback').classList.add('hidden');
+        document.getElementById('copyError').classList.add('hidden');
+    }
+
+    function showCopySuccess() {
         const btnText = document.getElementById('btnText');
         const originalText = btnText.innerText;
         const feedback = document.getElementById('copyFeedback');
 
         btnText.innerText = 'Copied!';
         feedback.classList.remove('hidden');
+        document.getElementById('copyError').classList.add('hidden');
 
         setTimeout(() => {
             btnText.innerText = originalText;
             feedback.classList.add('hidden');
+        }, 2000);
+    }
+
+    function showCopyFailure() {
+        const btnText = document.getElementById('btnText');
+        const originalText = btnText.innerText;
+
+        btnText.innerText = 'Select';
+        document.getElementById('copyFeedback').classList.add('hidden');
+        document.getElementById('copyError').classList.remove('hidden');
+
+        setTimeout(() => {
+            btnText.innerText = originalText;
         }, 2000);
     }
 </script>

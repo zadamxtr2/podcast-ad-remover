@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the feed instruction page copy button so it reports success only after a confirmed clipboard write and shows manual copy guidance when browsers block automatic copying.
+
 ## 1.5.1 - 2026-06-14
 
 - Added a Direct link subscription option beside the podcast-client app links while keeping the existing RSS feed link.

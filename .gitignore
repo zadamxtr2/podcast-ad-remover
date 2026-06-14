@@ -23,6 +23,9 @@ app/models/piper/
 *.swp
 *.swo
 
+# Local agent attachments
+.codex-remote-attachments/
+
 # OS
 .DS_Store
 Thumbs.db

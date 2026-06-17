@@ -28,7 +28,7 @@ The application is intentionally simple: one web app, one SQLite database, local
 Key areas:
 - `app/web/router.py`: HTML UI routes and admin actions.
 - `app/web/templates/`: Jinja templates.
-- `app/api/`: subscription and audio endpoints.
+- `app/api/`: dashboard API, audio endpoints, and the optional AI-facing `/api/v1` REST API.
 - `app/web/auth.py` and `app/web/middleware.py`: authentication and request handling.
 
 ### Processing Core
@@ -110,6 +110,14 @@ RSS feeds and audio files remain public when feed authentication is disabled. Wh
 Tokens are stored as SHA-256 hashes in `feed_tokens` and can be listed or revoked from the admin Feed Access page. Basic Auth and the older `?auth=base64(username:password)` format are still accepted for compatibility with existing podcast-client subscriptions.
 
 Dashboard and public subscribe pages build podcast-client links through one server-side helper so tokenized feed URLs are encoded consistently. Direct RSS and Overcast links are emitted directly. Apple, Pocket Casts, Castbox, and Podcast Addict route through local instruction pages; Pocket Casts, Castbox, and Podcast Addict include a clearly labelled best-effort app link before the manual RSS instructions.
+
+### AI API Access
+
+The AI-facing REST API is disabled by default and lives under `/api/v1`. It uses scoped bearer tokens stored in `api_tokens` as SHA-256 hashes and SQLite-backed request counters in `api_rate_limits`.
+
+API tokens are independent from dashboard sessions and feed tokens. Dashboard authentication middleware bypasses `/api/v1/*` after the global IP allowlist so API clients receive JSON `401`, `403`, and `429` responses instead of browser login redirects. Feed tokens continue to grant only RSS/audio access.
+
+Initial API scopes are `read`, `write`, `process`, and `admin`. Hard global podcast deletion is intentionally not exposed in API v1.
 
 ### Access Requests
 

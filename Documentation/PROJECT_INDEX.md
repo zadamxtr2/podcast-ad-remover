@@ -19,7 +19,7 @@ Podcast Ad Remover downloads podcast episodes, processes them to remove ads or p
 - `app/core/`: podcast, audio, AI, RSS, search, and processing logic.
 - `app/infra/`: SQLite initialization and repository access.
 - `app/web/`: web routes, templates, authentication helpers, and static files.
-- `app/api/`: subscription and audio endpoints.
+- `app/api/`: dashboard API, audio endpoints, and the optional AI-facing `/api/v1` REST API.
 - `Documentation/`: architecture, deployment, release, and maintenance docs.
 - `Documentation/unraid/podcast-ad-remover.xml`: Unraid Docker template.
 - `scripts/`: verification, migration dry-run, and Docker release helpers.
@@ -43,6 +43,7 @@ docker compose up -d --build
 ## Documentation Map
 
 - `Documentation/Architecture.md`: current application structure and data layout.
+- `Documentation/API.md`: optional AI-facing REST API, auth, scopes, and rate limits.
 - `Documentation/Deployment.md`: Docker and Docker Compose deployment.
 - `Documentation/Environment_Variables.md`: environment configuration.
 - `Documentation/VERSIONING.md`: version bump and Docker tag rules.

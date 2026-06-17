@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added an optional token-protected AI REST API under `/api/v1`, with scoped admin-managed tokens, SQLite-backed rate limits, OpenAPI discovery, and System Settings controls.
+
 ## 1.5.2 - 2026-06-14
 
 - Fixed the feed instruction page copy button so it reports success only after a confirmed clipboard write and shows manual copy guidance when browsers block automatic copying.

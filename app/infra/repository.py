@@ -2,6 +2,7 @@ import sqlite3
 import socket
 import hashlib
 import secrets
+import time
 from typing import List, Optional
 from datetime import datetime
 from app.infra.database import get_db_connection
@@ -921,3 +922,192 @@ class FeedTokenRepository:
             """, (token_id,))
             conn.commit()
             return result.rowcount > 0
+
+
+class ApiTokenRepository:
+    """Manage scoped bearer tokens for the AI-facing REST API."""
+
+    TOKEN_PREFIX = "par_"
+    DISPLAY_PREFIX_LENGTH = 12
+    VALID_SCOPES = {"read", "write", "process", "admin"}
+
+    @staticmethod
+    def hash_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def normalize_scopes(cls, scopes: list[str] | str | None) -> str:
+        if isinstance(scopes, str):
+            raw_scopes = [scope.strip() for scope in scopes.split(",")]
+        else:
+            raw_scopes = scopes or []
+
+        cleaned = sorted({scope for scope in raw_scopes if scope in cls.VALID_SCOPES})
+        if not cleaned:
+            cleaned = ["read"]
+        return ",".join(cleaned)
+
+    def create(
+        self,
+        name: str,
+        scopes: list[str] | str | None = None,
+        user_id: int | None = None,
+        requests_per_minute: int | None = None,
+        requests_per_day: int | None = None,
+    ) -> str:
+        token = f"{self.TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
+        token_hash = self.hash_token(token)
+        token_prefix = token[: self.DISPLAY_PREFIX_LENGTH]
+        normalized_scopes = self.normalize_scopes(scopes)
+        safe_name = (name or "AI API token").strip()[:120] or "AI API token"
+
+        with get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_tokens
+                    (user_id, token_hash, token_prefix, name, scopes, requests_per_minute, requests_per_day)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    token_hash,
+                    token_prefix,
+                    safe_name,
+                    normalized_scopes,
+                    requests_per_minute if requests_per_minute and requests_per_minute > 0 else None,
+                    requests_per_day if requests_per_day and requests_per_day > 0 else None,
+                ),
+            )
+            conn.commit()
+
+        return token
+
+    def list_active(self) -> list[dict]:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT at.id,
+                       at.user_id,
+                       at.token_prefix,
+                       at.name,
+                       at.scopes,
+                       at.requests_per_minute,
+                       at.requests_per_day,
+                       at.created_at,
+                       at.last_used_at,
+                       u.username
+                FROM api_tokens at
+                LEFT JOIN users u ON u.id = at.user_id
+                WHERE at.revoked_at IS NULL
+                ORDER BY at.created_at DESC
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def validate(self, token: str | None) -> dict | None:
+        if not token or not token.startswith(self.TOKEN_PREFIX):
+            return None
+
+        token_hash = self.hash_token(token)
+        with get_db_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT id,
+                       user_id,
+                       token_prefix,
+                       name,
+                       scopes,
+                       requests_per_minute,
+                       requests_per_day
+                FROM api_tokens
+                WHERE token_hash = ?
+                  AND revoked_at IS NULL
+                """,
+                (token_hash,),
+            ).fetchone()
+            if not row:
+                return None
+
+            conn.execute(
+                "UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (row["id"],),
+            )
+            conn.commit()
+            return dict(row)
+
+    def revoke_by_id(self, token_id: int) -> bool:
+        with get_db_connection() as conn:
+            result = conn.execute(
+                """
+                UPDATE api_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND revoked_at IS NULL
+                """,
+                (token_id,),
+            )
+            conn.commit()
+            return result.rowcount > 0
+
+
+class ApiRateLimitRepository:
+    """SQLite fixed-window counters for AI API request limits."""
+
+    def check_and_increment(self, bucket_key: str, limit: int, window_seconds: int, window_name: str) -> tuple[bool, int]:
+        if limit <= 0:
+            return True, 0
+
+        now = int(time.time())
+        window_start = now - (now % window_seconds)
+        reset_after = window_start + window_seconds - now
+
+        with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT request_count
+                FROM api_rate_limits
+                WHERE bucket_key = ?
+                  AND window_name = ?
+                  AND window_start = ?
+                """,
+                (bucket_key, window_name, window_start),
+            ).fetchone()
+
+            if not row:
+                conn.execute(
+                    """
+                    INSERT INTO api_rate_limits (bucket_key, window_name, window_start, request_count)
+                    VALUES (?, ?, ?, 1)
+                    """,
+                    (bucket_key, window_name, window_start),
+                )
+                self._cleanup_old_windows(conn, now)
+                conn.commit()
+                return True, reset_after
+
+            count = int(row["request_count"])
+            if count >= limit:
+                conn.commit()
+                return False, reset_after
+
+            conn.execute(
+                """
+                UPDATE api_rate_limits
+                SET request_count = request_count + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE bucket_key = ?
+                  AND window_name = ?
+                  AND window_start = ?
+                """,
+                (bucket_key, window_name, window_start),
+            )
+            self._cleanup_old_windows(conn, now)
+            conn.commit()
+            return True, reset_after
+
+    @staticmethod
+    def _cleanup_old_windows(conn: sqlite3.Connection, now: int) -> None:
+        conn.execute(
+            "DELETE FROM api_rate_limits WHERE window_start < ?",
+            (now - (3 * 24 * 60 * 60),),
+        )

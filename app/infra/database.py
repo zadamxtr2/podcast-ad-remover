@@ -133,6 +133,50 @@ FORMAL_MIGRATIONS = [
             "ALTER TABLE app_settings ADD COLUMN gemini_tts_model_cascade TEXT DEFAULT '[\"gemini-3.1-flash-tts-preview\", \"gemini-2.5-flash-preview-tts\"]'",
         ],
     ),
+    (
+        "20260617_0007_ai_api",
+        [
+            "ALTER TABLE app_settings ADD COLUMN ai_api_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE app_settings ADD COLUMN ai_api_default_requests_per_minute INTEGER DEFAULT 60",
+            "ALTER TABLE app_settings ADD COLUMN ai_api_default_requests_per_day INTEGER DEFAULT 1000",
+            "ALTER TABLE app_settings ADD COLUMN ai_api_unauth_requests_per_minute INTEGER DEFAULT 10",
+            """
+            CREATE TABLE IF NOT EXISTS api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                token_hash TEXT NOT NULL UNIQUE,
+                token_prefix TEXT NOT NULL,
+                name TEXT NOT NULL,
+                scopes TEXT NOT NULL,
+                requests_per_minute INTEGER,
+                requests_per_day INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP,
+                revoked_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_api_tokens_active
+            ON api_tokens(revoked_at, token_prefix)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS api_rate_limits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bucket_key TEXT NOT NULL,
+                window_name TEXT NOT NULL,
+                window_start INTEGER NOT NULL,
+                request_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(bucket_key, window_name, window_start)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_api_rate_limits_cleanup
+            ON api_rate_limits(window_name, window_start)
+            """,
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000

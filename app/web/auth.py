@@ -107,6 +107,7 @@ async def auth_middleware(request: Request, call_next):
     # Skip dashboard auth for public paths after applying the global IP allowlist.
     if path in ["/login", "/request-access", "/submit-access-request"] or \
        path.startswith("/static/") or \
+       path.startswith("/api/v1/") or \
        path == "/subscribe" or \
        path.startswith("/subscribe/") or \
        path.startswith("/feeds/") or \

@@ -42,6 +42,13 @@
             <input type="hidden" name="concurrent_downloads" value="{{ settings.concurrent_downloads or 3 }}">
             <input type="hidden" name="retention_days" value="{{ settings.retention_days or 30 }}">
             <input type="hidden" name="check_interval_minutes" value="{{ settings.check_interval_minutes or 60 }}">
+            <input type="hidden" name="whisper_cpu_threads" value="{{ settings.whisper_cpu_threads or 0 }}">
+            <input type="hidden" name="ffmpeg_threads" value="{{ settings.ffmpeg_threads or 0 }}">
+            <input type="hidden" name="unload_whisper_after_job" value="{% if settings.unload_whisper_after_job %}on{% endif %}">
+            <input type="hidden" name="ai_api_enabled" value="{% if settings.ai_api_enabled %}on{% endif %}">
+            <input type="hidden" name="ai_api_default_requests_per_minute" value="{{ settings.ai_api_default_requests_per_minute or 60 }}">
+            <input type="hidden" name="ai_api_default_requests_per_day" value="{{ settings.ai_api_default_requests_per_day or 1000 }}">
+            <input type="hidden" name="ai_api_unauth_requests_per_minute" value="{{ settings.ai_api_unauth_requests_per_minute or 10 }}">
             <input type="hidden" name="app_external_url" value="{{ settings.app_external_url or '' }}">
             <input type="hidden" name="enable_feed_auth" value="{% if settings.enable_feed_auth %}on{% endif %}">
             <input type="hidden" name="public_subscribe_page_enabled" value="{% if settings.public_subscribe_page_enabled %}on{% endif %}">

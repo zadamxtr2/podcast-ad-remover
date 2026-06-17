@@ -45,6 +45,8 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
 
     assert "jobs" in tables
     assert "feed_tokens" in tables
+    assert "api_tokens" in tables
+    assert "api_rate_limits" in tables
     assert "user_subscriptions" in tables
     assert "schema_migrations" in tables
     assert "20260609_0001_jobs" in migrations
@@ -53,6 +55,7 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
     assert "20260612_0004_access_request_password_hash" in migrations
     assert "20260612_0005_notifications" in migrations
     assert "20260612_0006_tts_provider_settings" in migrations
+    assert "20260617_0007_ai_api" in migrations
 
     with get_db_connection() as conn:
         access_request_columns = {
@@ -75,6 +78,10 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
         "tts_provider",
         "gemini_tts_voice",
         "gemini_tts_model_cascade",
+        "ai_api_enabled",
+        "ai_api_default_requests_per_minute",
+        "ai_api_default_requests_per_day",
+        "ai_api_unauth_requests_per_minute",
     }.issubset(settings_columns)
 
 
@@ -88,7 +95,9 @@ def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
                    notifications_enabled, notification_urls,
                    notify_access_requests, notify_new_podcasts,
                    notify_episode_downloads, notify_breaking_errors,
-                   tts_provider, gemini_tts_voice, gemini_tts_model_cascade
+                   tts_provider, gemini_tts_voice, gemini_tts_model_cascade,
+                   ai_api_enabled, ai_api_default_requests_per_minute,
+                   ai_api_default_requests_per_day, ai_api_unauth_requests_per_minute
             FROM app_settings WHERE id = 1
         """).fetchone()
 
@@ -111,6 +120,10 @@ def test_init_db_creates_resource_tuning_defaults(isolated_data_dir):
     assert row["gemini_tts_voice"] == "Orus"
     assert "gemini-3.1-flash-tts-preview" in row["gemini_tts_model_cascade"]
     assert "gemini-2.5-flash-preview-tts" in row["gemini_tts_model_cascade"]
+    assert row["ai_api_enabled"] == 0
+    assert row["ai_api_default_requests_per_minute"] == 60
+    assert row["ai_api_default_requests_per_day"] == 1000
+    assert row["ai_api_unauth_requests_per_minute"] == 10
 
 
 def test_database_connections_use_wal_and_busy_timeout(isolated_data_dir):

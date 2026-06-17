@@ -49,3 +49,7 @@ Notifications should stay optional and provider-agnostic. Embedding the Apprise 
 ## 2026-06-12: Keep Piper default while adding optional Gemini TTS
 
 Piper remains the default because it is local, offline, and does not consume API quota. Gemini TTS is available as an optional provider for installs that prefer hosted speech generation or experimental images without Piper. It reuses Gemini API keys, has its own TTS model cascade, and keeps text-analysis model settings separate from voice settings in the admin UI.
+
+## 2026-06-17: Keep the AI API opt-in and token-scoped
+
+The AI-facing integration surface is a REST API under `/api/v1`, disabled by default and protected by admin-managed bearer tokens. API tokens are separate from feed tokens, use explicit scopes, and have SQLite-backed rate limits so the feature fits the existing single-container SQLite deployment model.

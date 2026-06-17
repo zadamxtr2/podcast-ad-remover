@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Form, Depends, BackgroundTasks, HTTPException, status
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
-from app.infra.repository import SubscriptionRepository, EpisodeRepository, FeedTokenRepository
+from app.infra.repository import ApiTokenRepository, SubscriptionRepository, EpisodeRepository, FeedTokenRepository
 from app.core.feed import FeedManager
 from app.core.models import SubscriptionCreate
 from app.core.system_status import get_operation_status
@@ -48,6 +48,7 @@ templates.env.filters['compact_datetime'] = compact_datetime
 sub_repo = SubscriptionRepository()
 ep_repo = EpisodeRepository()
 feed_token_repo = FeedTokenRepository()
+api_token_repo = ApiTokenRepository()
 
 
 def _append_feed_access_to_enclosures(xml_content: str, param_name: str, token_value: str) -> str:
@@ -412,6 +413,7 @@ async def view_settings_redirect():
 async def admin_system(request: Request):
     user = get_current_user(request)
     global_settings = get_global_settings()
+    new_api_token = request.session.pop("new_api_token", None)
     return templates.TemplateResponse(
         request=request,
         name="admin/system.html",
@@ -419,6 +421,8 @@ async def admin_system(request: Request):
             "csp_nonce": get_csp_nonce(request),
             "user": user,
             "settings": global_settings,
+            "active_api_tokens": api_token_repo.list_active(),
+            "new_api_token": new_api_token,
             "setup_status": get_setup_status(request, global_settings),
             "pending_requests_count": get_pending_requests_count(),
             "active_tab": "system"
@@ -474,6 +478,10 @@ async def update_system_settings(
     whisper_cpu_threads: int = Form(0),
     ffmpeg_threads: int = Form(0),
     unload_whisper_after_job: bool = Form(False),
+    ai_api_enabled: bool = Form(False),
+    ai_api_default_requests_per_minute: int = Form(60),
+    ai_api_default_requests_per_day: int = Form(1000),
+    ai_api_unauth_requests_per_minute: int = Form(10),
     app_external_url: str = Form(None),
     auth_enabled: bool = Form(False),
     ip_allowlist: str = Form(None),
@@ -556,6 +564,9 @@ async def update_system_settings(
         # Update settings
         whisper_cpu_threads = max(0, min(64, whisper_cpu_threads or 0))
         ffmpeg_threads = max(0, min(64, ffmpeg_threads or 0))
+        ai_api_default_requests_per_minute = max(1, min(10000, ai_api_default_requests_per_minute or 60))
+        ai_api_default_requests_per_day = max(1, min(1000000, ai_api_default_requests_per_day or 1000))
+        ai_api_unauth_requests_per_minute = max(1, min(1000, ai_api_unauth_requests_per_minute or 10))
 
         conn.execute("""
             UPDATE app_settings SET concurrent_downloads = ?,
@@ -564,6 +575,10 @@ async def update_system_settings(
                 whisper_cpu_threads = ?,
                 ffmpeg_threads = ?,
                 unload_whisper_after_job = ?,
+                ai_api_enabled = ?,
+                ai_api_default_requests_per_minute = ?,
+                ai_api_default_requests_per_day = ?,
+                ai_api_unauth_requests_per_minute = ?,
                 app_external_url = ?,
                 auth_enabled = ?,
                 ip_allowlist = ?,
@@ -576,6 +591,10 @@ async def update_system_settings(
             WHERE id = 1
         """, (concurrent_downloads, retention_days, check_interval_minutes,
               whisper_cpu_threads, ffmpeg_threads, 1 if unload_whisper_after_job else 0,
+              1 if ai_api_enabled else 0,
+              ai_api_default_requests_per_minute,
+              ai_api_default_requests_per_day,
+              ai_api_unauth_requests_per_minute,
               app_external_url,
               1 if auth_enabled else 0, ip_allowlist,
               1 if enable_feed_auth else 0, 
@@ -607,6 +626,40 @@ async def update_system_settings(
     
     url = _safe_local_redirect(redirect_to, "/admin/system?success=System+settings+updated")
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/admin/api-tokens")
+async def create_api_token(
+    request: Request,
+    name: str = Form(...),
+    scopes: list[str] = Form(["read"]),
+    requests_per_minute: int = Form(None),
+    requests_per_day: int = Form(None),
+    admin_user = Depends(require_admin),
+):
+    allowed_scopes = ApiTokenRepository.VALID_SCOPES
+    selected_scopes = [scope for scope in scopes if scope in allowed_scopes]
+    if not selected_scopes:
+        selected_scopes = ["read"]
+
+    token = api_token_repo.create(
+        name=name,
+        scopes=selected_scopes,
+        user_id=admin_user.id if admin_user and admin_user.id and admin_user.id > 0 else None,
+        requests_per_minute=requests_per_minute,
+        requests_per_day=requests_per_day,
+    )
+    request.session["new_api_token"] = token
+    return RedirectResponse(url="/admin/system?success=API+token+created", status_code=303)
+
+
+@router.post("/admin/api-tokens/{token_id}/revoke")
+async def revoke_api_token(token_id: int, admin_user = Depends(require_admin)):
+    revoked = api_token_repo.revoke_by_id(token_id)
+    if not revoked:
+        return RedirectResponse(url="/admin/system?error=API+token+not+found", status_code=303)
+    return RedirectResponse(url="/admin/system?success=API+token+revoked", status_code=303)
+
 
 def _render_admin_ai(request: Request, ai_section: str):
     from app.core.config import settings

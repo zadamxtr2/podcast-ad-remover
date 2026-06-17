@@ -43,6 +43,7 @@ The admin queue shows active jobs, queued/retry states, disk usage, next feed ch
 - Optional AI episode summaries and spoken title intros using either local Piper TTS or Gemini TTS.
 - Durable SQLite-backed processing jobs with retry and rate-limit states.
 - Admin queue/operations dashboard.
+- Optional token-protected AI/automation REST API with scoped tokens and configurable rate limits.
 - Optional management login.
 - Optional feed/audio authentication with generated feed tokens.
 - Optional public read-only subscribe page for frictionless podcast-client setup.
@@ -138,6 +139,10 @@ The app supports separate choices for management access and podcast feed access:
 
 Protected feed URLs containing `token=` are bearer secrets. Anyone with the full URL can read that feed and download audio until the token is revoked.
 
+## AI API
+
+Admins can enable an optional REST API under `/api/v1` from **Admin > System Settings**. API clients use separate `par_...` bearer tokens with scoped access (`read`, `write`, `process`, `admin`) and SQLite-backed per-token/IP rate limits. See [Documentation/API.md](Documentation/API.md).
+
 ## Admin Notifications
 
 Notifications are off by default. Admins can enable them from **Admin > Notifications** by adding one or more Apprise URLs and selecting which events should send alerts.
@@ -201,6 +206,7 @@ npm run docker:publish
 ## Documentation
 
 - [Project Index](Documentation/PROJECT_INDEX.md)
+- [AI API](Documentation/API.md)
 - [Architecture](Documentation/Architecture.md)
 - [Deployment](Documentation/Deployment.md)
 - [Environment Variables](Documentation/Environment_Variables.md)

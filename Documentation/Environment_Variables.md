@@ -82,6 +82,10 @@ These are configured from the Admin UI rather than environment variables:
 | `whisper_cpu_threads` | Faster-Whisper CPU thread cap. `0` uses the library default. | `0` |
 | `ffmpeg_threads` | FFmpeg thread cap. `0` lets FFmpeg choose automatically. | `0` |
 | `unload_whisper_after_job` | Unload the local Whisper model after the queue empties to reduce idle RAM. | `0` |
+| `ai_api_enabled` | Enable the token-protected AI-facing REST API under `/api/v1`. | `0` |
+| `ai_api_default_requests_per_minute` | Default per-token minute limit for authenticated AI API requests. | `60` |
+| `ai_api_default_requests_per_day` | Default per-token daily limit for authenticated AI API requests. | `1000` |
+| `ai_api_unauth_requests_per_minute` | Per-IP minute limit for missing or invalid AI API token attempts. | `10` |
 | `tts_provider` | TTS engine for spoken title intros and audio summaries: `piper` or `gemini`. | `piper` |
 | `gemini_tts_voice` | Gemini TTS voice when `tts_provider=gemini`. | `Orus` |
 | `gemini_tts_model_cascade` | JSON array of Gemini TTS models to try in order. | `["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]` |

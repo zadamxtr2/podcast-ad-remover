@@ -422,6 +422,7 @@ async def admin_system(request: Request):
             "user": user,
             "settings": global_settings,
             "active_api_tokens": api_token_repo.list_active(),
+            "active_users": _active_users(),
             "new_api_token": new_api_token,
             "setup_status": get_setup_status(request, global_settings),
             "pending_requests_count": get_pending_requests_count(),
@@ -632,11 +633,17 @@ async def update_system_settings(
 async def create_api_token(
     request: Request,
     name: str = Form(...),
+    user_id: int = Form(...),
     scopes: list[str] = Form(["read"]),
     requests_per_minute: int = Form(None),
     requests_per_day: int = Form(None),
     admin_user = Depends(require_admin),
 ):
+    with get_db_connection() as conn:
+        token_user = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not token_user:
+            return RedirectResponse(url="/admin/system?error=Select+a+valid+user+for+the+API+token", status_code=303)
+
     allowed_scopes = ApiTokenRepository.VALID_SCOPES
     selected_scopes = [scope for scope in scopes if scope in allowed_scopes]
     if not selected_scopes:
@@ -645,7 +652,7 @@ async def create_api_token(
     token = api_token_repo.create(
         name=name,
         scopes=selected_scopes,
-        user_id=admin_user.id if admin_user and admin_user.id and admin_user.id > 0 else None,
+        user_id=user_id,
         requests_per_minute=requests_per_minute,
         requests_per_day=requests_per_day,
     )
@@ -1197,6 +1204,36 @@ async def admin_users(request: Request):
         name="admin/users.html",
         context=context,
     )
+
+
+@router.post("/admin/users")
+async def create_user(
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+    is_admin: bool = Form(False),
+    admin_user = Depends(require_admin),
+):
+    cleaned_username = username.strip()
+    if len(cleaned_username) < 3:
+        return RedirectResponse(url="/admin/users?error=Username+must+be+at+least+3+characters", status_code=303)
+    if password != confirm_password:
+        return RedirectResponse(url="/admin/users?error=Passwords+do+not+match", status_code=303)
+    if len(password) < 8:
+        return RedirectResponse(url="/admin/users?error=Password+must+be+at+least+8+characters", status_code=303)
+
+    with get_db_connection() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE username = ?", (cleaned_username,)).fetchone()
+        if existing:
+            return RedirectResponse(url="/admin/users?error=Username+already+exists", status_code=303)
+
+        conn.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
+            (cleaned_username, hash_password(password), 1 if is_admin else 0),
+        )
+        conn.commit()
+
+    return RedirectResponse(url=f"/admin/users?success=User+created+for+{quote(cleaned_username)}", status_code=303)
 
 
 @router.get("/admin/access-requests", response_class=HTMLResponse)

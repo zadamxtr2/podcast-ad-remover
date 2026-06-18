@@ -9,8 +9,9 @@ Use this API when you want an assistant to inspect podcasts, find episodes, read
 1. Open **Admin > System Settings > AI API**.
 2. Enable **AI API**.
 3. Set default rate limits.
-4. Create an API token.
-5. Copy the token immediately. The full token is shown only once.
+4. Create or choose the dashboard user the API token should act as.
+5. Create an API token and assign it to that user.
+6. Copy the token immediately. The full token is shown only once.
 
 Example request:
 
@@ -32,6 +33,15 @@ API tokens are different from feed tokens:
 - API tokens control management and automation actions.
 - Feed tokens only allow podcast clients to read protected feeds/audio.
 - API token hashes are stored in SQLite; the full token is never stored.
+- New API tokens must be linked to a dashboard user. API reads and actions are treated as that user.
+
+Linked-token access rules:
+
+- Tokens linked to normal users see only that user's podcast library.
+- Tokens linked to normal users can change settings only for podcasts owned by that user.
+- Tokens linked to admin users can see and manage the global library.
+- The `admin` scope only exposes system status when the token is linked to an admin user.
+- Legacy unlinked tokens keep the older global behavior until you migrate or revoke them.
 
 Available scopes:
 
@@ -43,6 +53,37 @@ Available scopes:
 | `admin` | Read instance-level system status. |
 
 For a general AI assistant, a practical token is usually `read`, `write`, and `process`. Add `admin` only when the assistant should inspect instance health.
+
+## Linking Existing API Tokens
+
+Use `scripts/link_api_token_user.py` to migrate an existing token to a dashboard user without recreating the token.
+
+List current API tokens:
+
+```bash
+python scripts/link_api_token_user.py --list --db-path /data/db/podcasts.db
+```
+
+Link by token id and username:
+
+```bash
+python scripts/link_api_token_user.py --token-id 1 --username alice --db-path /data/db/podcasts.db
+```
+
+Link by token prefix and user id:
+
+```bash
+python scripts/link_api_token_user.py --token-prefix par_abc12345 --user-id 2 --db-path /data/db/podcasts.db
+```
+
+In Docker, run the same command inside the app container:
+
+```bash
+docker exec -it podcast-ad-remover python scripts/link_api_token_user.py --list
+docker exec -it podcast-ad-remover python scripts/link_api_token_user.py --token-id 1 --username alice
+```
+
+The script only updates the `user_id` on an active API token. It does not need or reveal the full bearer token.
 
 ## Rate Limits
 

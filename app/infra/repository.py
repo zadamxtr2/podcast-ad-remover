@@ -995,7 +995,8 @@ class ApiTokenRepository:
                        at.requests_per_day,
                        at.created_at,
                        at.last_used_at,
-                       u.username
+                       u.username,
+                       COALESCE(u.is_admin, 0) AS is_admin
                 FROM api_tokens at
                 LEFT JOIN users u ON u.id = at.user_id
                 WHERE at.revoked_at IS NULL
@@ -1012,20 +1013,25 @@ class ApiTokenRepository:
         with get_db_connection() as conn:
             row = conn.execute(
                 """
-                SELECT id,
-                       user_id,
-                       token_prefix,
-                       name,
-                       scopes,
-                       requests_per_minute,
-                       requests_per_day
-                FROM api_tokens
-                WHERE token_hash = ?
-                  AND revoked_at IS NULL
+                SELECT at.id,
+                       at.user_id,
+                       at.token_prefix,
+                       at.name,
+                       at.scopes,
+                       at.requests_per_minute,
+                       at.requests_per_day,
+                       u.username,
+                       COALESCE(u.is_admin, 0) AS is_admin
+                FROM api_tokens at
+                LEFT JOIN users u ON u.id = at.user_id
+                WHERE at.token_hash = ?
+                  AND at.revoked_at IS NULL
                 """,
                 (token_hash,),
             ).fetchone()
             if not row:
+                return None
+            if row["user_id"] is not None and row["username"] is None:
                 return None
 
             conn.execute(

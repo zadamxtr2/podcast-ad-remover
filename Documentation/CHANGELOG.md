@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added direct admin user creation from User Management.
+- Changed new AI API token creation to require selecting the dashboard user the token acts as, and made linked API tokens use that user's library/admin permissions.
+- Added `scripts/link_api_token_user.py` to list and link existing API tokens to users without recreating the token.
+
 ## 1.6.1 - 2026-06-17
 
 - Fixed AI API subscription creation so valid HTTP/HTTPS feed URLs are accepted instead of treated as validation errors.

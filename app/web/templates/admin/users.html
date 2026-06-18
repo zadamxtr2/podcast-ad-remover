@@ -64,6 +64,34 @@
 </section>
 
 <section class="mb-8">
+    <h3 class="font-display text-xl font-bold mb-4">Create User</h3>
+    <form method="post" action="/admin/users" class="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-text-secondary mb-2">Username</label>
+                <input type="text" name="username" minlength="3" maxlength="80" required class="input">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-text-secondary mb-2">Password</label>
+                <input type="password" name="password" minlength="8" required class="input">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-text-secondary mb-2">Confirm Password</label>
+                <input type="password" name="confirm_password" minlength="8" required class="input">
+            </div>
+            <div class="flex items-end">
+                <button type="submit" class="btn-primary w-full">Create User</button>
+            </div>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm text-text-secondary mt-4">
+            <input type="checkbox" name="is_admin"
+                class="w-4 h-4 rounded border-white/20 bg-white/5 text-accent-primary focus:ring-accent-primary">
+            Admin user
+        </label>
+    </form>
+</section>
+
+<section class="mb-8">
     <h3 class="font-display text-xl font-bold mb-4">Active Users</h3>
 
     <div class="hidden md:block rounded-xl border border-white/[0.06] overflow-hidden">

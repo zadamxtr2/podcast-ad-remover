@@ -77,6 +77,8 @@ def get_api_principal(
         name=token["name"],
         scopes={scope.strip() for scope in token["scopes"].split(",") if scope.strip()},
         user_id=token["user_id"],
+        username=token["username"],
+        is_admin=bool(token["is_admin"]),
         requests_per_minute=token["requests_per_minute"],
         requests_per_day=token["requests_per_day"],
     )

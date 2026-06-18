@@ -238,10 +238,18 @@
         {% endif %}
 
         <form method="post" action="/admin/api-tokens" class="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4">
-            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 <div>
                     <label class="block text-sm font-medium text-text-secondary mb-2">Token Name</label>
                     <input type="text" name="name" value="AI assistant" maxlength="120" required class="input">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-2">Act As User</label>
+                    <select name="user_id" required class="input" {% if not active_users %}disabled{% endif %}>
+                        {% for api_user in active_users %}
+                        <option value="{{ api_user.id }}">{{ api_user.username }}{% if api_user.is_admin %} (Admin){% endif %}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-text-secondary mb-2">Requests Per Minute</label>
@@ -254,9 +262,12 @@
                         value="{{ settings.ai_api_default_requests_per_day or 1000 }}" min="1" max="1000000" class="input">
                 </div>
                 <div class="flex items-end">
-                    <button type="submit" class="btn-primary w-full">Create Token</button>
+                    <button type="submit" class="btn-primary w-full" {% if not active_users %}disabled{% endif %}>Create Token</button>
                 </div>
             </div>
+            {% if not active_users %}
+            <p class="text-sm text-text-muted mt-3">Create a dashboard user before issuing API tokens.</p>
+            {% endif %}
             <div class="mt-4 flex flex-wrap gap-4">
                 {% for scope in ["read", "write", "process", "admin"] %}
                 <label class="inline-flex items-center gap-2 text-sm text-text-secondary">
@@ -275,6 +286,7 @@
             <thead class="bg-white/[0.03] text-text-muted">
                 <tr>
                     <th class="text-left p-3 font-medium">Name</th>
+                    <th class="text-left p-3 font-medium">User</th>
                     <th class="text-left p-3 font-medium">Prefix</th>
                     <th class="text-left p-3 font-medium">Scopes</th>
                     <th class="text-left p-3 font-medium">Limits</th>
@@ -286,6 +298,13 @@
                 {% for token in active_api_tokens %}
                 <tr>
                     <td class="p-3 font-medium">{{ token.name }}</td>
+                    <td class="p-3 text-text-secondary">
+                        {% if token.username %}
+                        {{ token.username }}{% if token.is_admin %} <span class="badge-info ml-1">Admin</span>{% endif %}
+                        {% else %}
+                        <span class="text-amber-300">Unlinked</span>
+                        {% endif %}
+                    </td>
                     <td class="p-3 text-text-secondary"><code>{{ token.token_prefix }}...</code></td>
                     <td class="p-3 text-text-secondary">{{ token.scopes }}</td>
                     <td class="p-3 text-text-secondary">

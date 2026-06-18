@@ -3,7 +3,8 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.router import router as ai_api_router
 from app.infra.database import get_db_connection, init_db
-from app.infra.repository import ApiRateLimitRepository, ApiTokenRepository
+from app.infra.repository import ApiRateLimitRepository, ApiTokenRepository, SubscriptionRepository
+from app.core.models import SubscriptionCreate
 
 
 def make_client() -> TestClient:
@@ -30,6 +31,25 @@ def enable_ai_api(*, per_minute: int = 60, per_day: int = 1000, unauth_per_minut
 
 def auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def create_user(username: str, *, is_admin: bool = False) -> int:
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
+            (username, "hash", 1 if is_admin else 0),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def create_subscription(feed_url: str, title: str, slug: str, *, owner_user_id: int | None = None):
+    return SubscriptionRepository().create(
+        sub=SubscriptionCreate(feed_url=feed_url),
+        title=title,
+        slug=slug,
+        owner_user_id=owner_user_id,
+    )
 
 
 def test_ai_api_migration_creates_defaults_and_tables(isolated_data_dir):
@@ -67,7 +87,14 @@ def test_api_tokens_validate_list_and_revoke_without_exposing_hash(isolated_data
     init_db()
     repo = ApiTokenRepository()
 
-    token = repo.create("Assistant", scopes=["read", "process"], requests_per_minute=5, requests_per_day=50)
+    user_id = create_user("assistant")
+    token = repo.create(
+        "Assistant",
+        scopes=["read", "process"],
+        user_id=user_id,
+        requests_per_minute=5,
+        requests_per_day=50,
+    )
     token_row = repo.validate(token)
     listed = repo.list_active()
 
@@ -75,7 +102,11 @@ def test_api_tokens_validate_list_and_revoke_without_exposing_hash(isolated_data
     assert token_row is not None
     assert token_row["name"] == "Assistant"
     assert token_row["scopes"] == "process,read"
+    assert token_row["user_id"] == user_id
+    assert token_row["username"] == "assistant"
+    assert token_row["is_admin"] == 0
     assert listed[0]["token_prefix"] == token[:12]
+    assert listed[0]["username"] == "assistant"
     assert "token_hash" not in listed[0]
 
     assert repo.revoke_by_id(listed[0]["id"]) is True
@@ -209,3 +240,101 @@ def test_create_subscription_rejects_invalid_url(isolated_data_dir):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Only HTTP and HTTPS URLs are supported"
+
+
+def test_linked_user_token_reads_only_user_library(isolated_data_dir):
+    init_db()
+    enable_ai_api()
+    first_user_id = create_user("first")
+    second_user_id = create_user("second")
+    first_sub = create_subscription(
+        "https://example.com/first.xml",
+        "First Show",
+        "first-show",
+        owner_user_id=first_user_id,
+    )
+    second_sub = create_subscription(
+        "https://example.com/second.xml",
+        "Second Show",
+        "second-show",
+        owner_user_id=second_user_id,
+    )
+    token = ApiTokenRepository().create("First assistant", scopes=["read"], user_id=first_user_id)
+    client = make_client()
+
+    listed = client.get("/api/v1/subscriptions", headers=auth_header(token))
+    allowed = client.get(f"/api/v1/subscriptions/{first_sub.id}", headers=auth_header(token))
+    denied = client.get(f"/api/v1/subscriptions/{second_sub.id}", headers=auth_header(token))
+
+    assert listed.status_code == 200
+    assert [sub["id"] for sub in listed.json()] == [first_sub.id]
+    assert allowed.status_code == 200
+    assert denied.status_code == 404
+
+
+def test_linked_user_token_can_update_owned_subscription_only(isolated_data_dir):
+    init_db()
+    enable_ai_api()
+    first_user_id = create_user("first")
+    second_user_id = create_user("second")
+    first_sub = create_subscription(
+        "https://example.com/first.xml",
+        "First Show",
+        "first-show",
+        owner_user_id=first_user_id,
+    )
+    second_sub = create_subscription(
+        "https://example.com/second.xml",
+        "Second Show",
+        "second-show",
+        owner_user_id=second_user_id,
+    )
+    token = ApiTokenRepository().create("First writer", scopes=["write"], user_id=first_user_id)
+    client = make_client()
+
+    owned = client.patch(
+        f"/api/v1/subscriptions/{first_sub.id}/settings",
+        headers=auth_header(token),
+        json={"remove_ads": False},
+    )
+    other = client.patch(
+        f"/api/v1/subscriptions/{second_sub.id}/settings",
+        headers=auth_header(token),
+        json={"remove_ads": False},
+    )
+
+    assert owned.status_code == 200
+    assert owned.json()["status"] == "updated"
+    assert other.status_code == 404
+
+
+def test_admin_linked_token_can_read_all_and_use_admin_scope(isolated_data_dir):
+    init_db()
+    enable_ai_api()
+    admin_user_id = create_user("site-admin", is_admin=True)
+    first_user_id = create_user("first")
+    second_user_id = create_user("second")
+    create_subscription("https://example.com/first.xml", "First Show", "first-show", owner_user_id=first_user_id)
+    create_subscription("https://example.com/second.xml", "Second Show", "second-show", owner_user_id=second_user_id)
+    token = ApiTokenRepository().create("Admin assistant", scopes=["read", "admin"], user_id=admin_user_id)
+    client = make_client()
+
+    listed = client.get("/api/v1/subscriptions", headers=auth_header(token))
+    status_response = client.get("/api/v1/system/status", headers=auth_header(token))
+
+    assert listed.status_code == 200
+    assert {sub["title"] for sub in listed.json()} == {"First Show", "Second Show"}
+    assert status_response.status_code == 200
+
+
+def test_non_admin_linked_token_with_admin_scope_is_denied_system_status(isolated_data_dir):
+    init_db()
+    enable_ai_api()
+    user_id = create_user("regular")
+    token = ApiTokenRepository().create("Regular admin-scoped", scopes=["admin"], user_id=user_id)
+    client = make_client()
+
+    response = client.get("/api/v1/system/status", headers=auth_header(token))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "API token is not linked to an admin user"

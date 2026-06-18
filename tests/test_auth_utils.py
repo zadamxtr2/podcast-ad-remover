@@ -213,6 +213,18 @@ def test_user_management_delete_uses_post_route():
     assert 'action="/admin/users/delete/' not in users_template
 
 
+def test_user_management_has_admin_create_user_form():
+    router_source = Path("app/web/router.py").read_text(encoding="utf-8")
+    users_template = Path("app/web/templates/admin/users.html").read_text(encoding="utf-8")
+
+    assert '@router.post("/admin/users")' in router_source
+    assert "async def create_user(" in router_source
+    assert "Depends(require_admin)" in router_source
+    assert 'action="/admin/users"' in users_template
+    assert 'name="confirm_password"' in users_template
+    assert 'name="is_admin"' in users_template
+
+
 def test_login_page_offers_public_subscribe_link_when_enabled():
     template_source = Path("app/web/templates/login.html").read_text(encoding="utf-8")
     router_source = Path("app/web/router.py").read_text(encoding="utf-8")

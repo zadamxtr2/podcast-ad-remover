@@ -10,6 +10,8 @@ class ApiPrincipal(BaseModel):
     name: str
     scopes: set[str]
     user_id: int | None = None
+    username: str | None = None
+    is_admin: bool = False
     requests_per_minute: int | None = None
     requests_per_day: int | None = None
 

@@ -39,7 +39,28 @@ def _processor() -> Processor:
     return Processor()
 
 
-def _get_episode_row(episode_id: int) -> dict[str, Any]:
+def _token_has_global_access(principal: ApiPrincipal) -> bool:
+    return principal.is_admin or principal.user_id is None
+
+
+def _require_admin_user(principal: ApiPrincipal) -> None:
+    if principal.user_id is not None and not principal.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API token is not linked to an admin user")
+
+
+def _has_subscription_access(principal: ApiPrincipal, subscription_id: int) -> bool:
+    if _token_has_global_access(principal):
+        return True
+    return sub_repo.is_in_user_library(principal.user_id, subscription_id)
+
+
+def _can_manage_subscription(principal: ApiPrincipal, sub: Subscription) -> bool:
+    if _token_has_global_access(principal):
+        return True
+    return sub.owner_user_id == principal.user_id
+
+
+def _get_episode_row(episode_id: int, principal: ApiPrincipal | None = None) -> dict[str, Any]:
     with get_db_connection() as conn:
         row = conn.execute(
             """
@@ -52,7 +73,10 @@ def _get_episode_row(episode_id: int) -> dict[str, Any]:
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Episode not found")
-        return dict(row)
+        episode = dict(row)
+        if principal and not _has_subscription_access(principal, episode["subscription_id"]):
+            raise HTTPException(status_code=404, detail="Episode not found")
+        return episode
 
 
 def _artifact_path(row: dict[str, Any], preferred_column: str, fallback_name: str) -> str | None:
@@ -65,9 +89,11 @@ def _artifact_path(row: dict[str, Any], preferred_column: str, fallback_name: st
     return candidate if os.path.exists(candidate) else None
 
 
-def _subscription_or_404(subscription_id: int) -> Subscription:
+def _subscription_or_404(subscription_id: int, principal: ApiPrincipal | None = None) -> Subscription:
     sub = sub_repo.get_by_id(subscription_id)
     if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    if principal and not _has_subscription_access(principal, subscription_id):
         raise HTTPException(status_code=404, detail="Subscription not found")
     return sub
 
@@ -103,27 +129,35 @@ async def api_openapi(_api_settings: dict = Depends(ensure_ai_api_enabled)):
 
 
 @router.get("/system/status")
-async def system_status(_principal: ApiPrincipal = Depends(require_scopes(["admin"]))):
+async def system_status(principal: ApiPrincipal = Depends(require_scopes(["admin"]))):
+    _require_admin_user(principal)
     return get_operation_status()
 
 
 @router.get("/queue", response_model=QueueResponse)
-async def queue_status(_principal: ApiPrincipal = Depends(require_scopes(["read"]))):
+async def queue_status(principal: ApiPrincipal = Depends(require_scopes(["read"]))):
+    queue = ep_repo.get_queue()
+    recently_processed = ep_repo.get_recently_processed(days=3)
+    if not _token_has_global_access(principal):
+        queue = [row for row in queue if _has_subscription_access(principal, row["subscription_id"])]
+        recently_processed = [
+            row for row in recently_processed if _has_subscription_access(principal, row["subscription_id"])
+        ]
     return {
-        "queue": ep_repo.get_queue(),
-        "recently_processed": ep_repo.get_recently_processed(days=3),
+        "queue": queue,
+        "recently_processed": recently_processed,
         "operation_status": get_operation_status(),
     }
 
 
 @router.get("/subscriptions", response_model=list[Subscription])
 async def list_subscriptions(principal: ApiPrincipal = Depends(require_scopes(["read"]))):
-    return sub_repo.get_all(user_id=principal.user_id, only_user=bool(principal.user_id))
+    return sub_repo.get_all(user_id=principal.user_id, only_user=bool(principal.user_id and not principal.is_admin))
 
 
 @router.get("/subscriptions/{subscription_id}", response_model=Subscription)
-async def get_subscription(subscription_id: int, _principal: ApiPrincipal = Depends(require_scopes(["read"]))):
-    return _subscription_or_404(subscription_id)
+async def get_subscription(subscription_id: int, principal: ApiPrincipal = Depends(require_scopes(["read"]))):
+    return _subscription_or_404(subscription_id, principal)
 
 
 @router.get("/subscriptions/{subscription_id}/episodes", response_model=PaginatedEpisodes)
@@ -132,9 +166,9 @@ async def list_subscription_episodes(
     limit: int = 20,
     offset: int = 0,
     search: str | None = None,
-    _principal: ApiPrincipal = Depends(require_scopes(["read"])),
+    principal: ApiPrincipal = Depends(require_scopes(["read"])),
 ):
-    _subscription_or_404(subscription_id)
+    _subscription_or_404(subscription_id, principal)
     safe_limit = max(1, min(limit, 100))
     safe_offset = max(0, offset)
     episodes = [dict(row) for row in ep_repo.get_by_subscription_paginated(subscription_id, safe_limit, safe_offset, search)]
@@ -150,13 +184,13 @@ async def list_subscription_episodes(
 
 
 @router.get("/episodes/{episode_id}")
-async def get_episode(episode_id: int, _principal: ApiPrincipal = Depends(require_scopes(["read"]))):
-    return _get_episode_row(episode_id)
+async def get_episode(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["read"]))):
+    return _get_episode_row(episode_id, principal)
 
 
 @router.get("/episodes/{episode_id}/transcript", response_model=TranscriptResponse)
-async def get_episode_transcript(episode_id: int, _principal: ApiPrincipal = Depends(require_scopes(["read"]))):
-    row = _get_episode_row(episode_id)
+async def get_episode_transcript(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["read"]))):
+    row = _get_episode_row(episode_id, principal)
     path = _artifact_path(row, "transcript_path", "transcript.json")
     if not path:
         raise HTTPException(status_code=404, detail="Transcript not found")
@@ -167,8 +201,8 @@ async def get_episode_transcript(episode_id: int, _principal: ApiPrincipal = Dep
 
 
 @router.get("/episodes/{episode_id}/report", response_model=ReportResponse)
-async def get_episode_report(episode_id: int, _principal: ApiPrincipal = Depends(require_scopes(["read"]))):
-    row = _get_episode_row(episode_id)
+async def get_episode_report(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["read"]))):
+    row = _get_episode_row(episode_id, principal)
     report_path = _artifact_path(row, "report_path", "report.json") or _artifact_path(row, "ad_report_path", "report.json")
     if not report_path:
         episode_slug = f"{row['guid']}".replace("/", "_").replace(" ", "_")
@@ -233,9 +267,14 @@ async def update_subscription_settings(
     subscription_id: int,
     request_body: SubscriptionSettingsUpdate,
     background_tasks: BackgroundTasks,
-    _principal: ApiPrincipal = Depends(require_scopes(["write"])),
+    principal: ApiPrincipal = Depends(require_scopes(["write"])),
 ):
-    sub = _subscription_or_404(subscription_id)
+    sub = _subscription_or_404(subscription_id, principal)
+    if not _can_manage_subscription(principal, sub):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and the podcast owner can change podcast settings",
+        )
     updates = request_body.model_dump(exclude_unset=True)
     sub_repo.update_settings(
         subscription_id,
@@ -267,16 +306,16 @@ async def update_subscription_settings(
 async def check_subscription(
     subscription_id: int,
     background_tasks: BackgroundTasks,
-    _principal: ApiPrincipal = Depends(require_scopes(["process"])),
+    principal: ApiPrincipal = Depends(require_scopes(["process"])),
 ):
-    _subscription_or_404(subscription_id)
+    _subscription_or_404(subscription_id, principal)
     background_tasks.add_task(_processor().check_feeds, subscription_id=subscription_id)
     return {"status": "check_triggered", "id": subscription_id}
 
 
 @router.post("/episodes/{episode_id}/download", response_model=ActionResponse)
-async def download_episode(episode_id: int, _principal: ApiPrincipal = Depends(require_scopes(["process"]))):
-    _get_episode_row(episode_id)
+async def download_episode(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["process"]))):
+    _get_episode_row(episode_id, principal)
     with get_db_connection() as conn:
         conn.execute("UPDATE episodes SET is_manual_download = 1 WHERE id = ?", (episode_id,))
         conn.commit()
@@ -288,9 +327,9 @@ async def download_episode(episode_id: int, _principal: ApiPrincipal = Depends(r
 async def reprocess_episode(
     episode_id: int,
     skip_transcription: bool = False,
-    _principal: ApiPrincipal = Depends(require_scopes(["process"])),
+    principal: ApiPrincipal = Depends(require_scopes(["process"])),
 ):
-    _get_episode_row(episode_id)
+    _get_episode_row(episode_id, principal)
     current_status = ep_repo.get_status(episode_id)
     if current_status == "processing":
         return {"status": "ignored", "id": episode_id, "detail": "already_processing"}
@@ -303,14 +342,14 @@ async def reprocess_episode(
 
 
 @router.post("/episodes/{episode_id}/cancel", response_model=ActionResponse)
-async def cancel_episode(episode_id: int, _principal: ApiPrincipal = Depends(require_scopes(["process"]))):
-    _get_episode_row(episode_id)
+async def cancel_episode(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["process"]))):
+    _get_episode_row(episode_id, principal)
     ep_repo.reset_status(episode_id)
     return {"status": "cancelled", "id": episode_id}
 
 
 @router.post("/episodes/{episode_id}/ignore", response_model=ActionResponse)
-async def ignore_episode(episode_id: int, _principal: ApiPrincipal = Depends(require_scopes(["process"]))):
-    _get_episode_row(episode_id)
+async def ignore_episode(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["process"]))):
+    _get_episode_row(episode_id, principal)
     await _processor().delete_episode(episode_id)
     return {"status": "ignored", "id": episode_id}

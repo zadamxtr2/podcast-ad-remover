@@ -1,5 +1,7 @@
 # Changelog
 
+## 1.7.2 - Unreleased
+
 ## 1.7.1 - 2026-07-03
 
 - Fixed feed parsing to handle podcast episodes that return string values in the enclosure length field instead of integers, which would previously crash the feed processor.

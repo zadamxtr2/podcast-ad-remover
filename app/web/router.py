@@ -676,7 +676,8 @@ def _render_admin_ai(request: Request, ai_section: str):
         "GEMINI_API_KEY": bool(settings.GEMINI_API_KEY),
         "OPENAI_API_KEY": bool(settings.OPENAI_API_KEY),
         "ANTHROPIC_API_KEY": bool(settings.ANTHROPIC_API_KEY),
-        "OPENROUTER_API_KEY": bool(settings.OPENROUTER_API_KEY)
+        "OPENROUTER_API_KEY": bool(settings.OPENROUTER_API_KEY),
+        "HF_TOKEN": bool(settings.HF_TOKEN)
     }
 
     user = get_current_user(request)
@@ -760,10 +761,10 @@ async def update_ai_settings(
         whisper_compute_type = "float32"
 
     # Validate chunking parameters
-    if chunk_num_chunks < 2 or chunk_num_chunks > 50:
+    if chunk_num_chunks < 1 or chunk_num_chunks > 50:
         chunk_num_chunks = 10
     if chunk_overlap_percent < 0 or chunk_overlap_percent > 75:
-        chunk_overlap_percent = 25
+        chunk_overlap_percent = 10
 
     # Handle checkbox: if not sent (None), it's unchecked (0). If sent, it's checked (1)
     if include_reason is None:
@@ -875,14 +876,19 @@ async def refresh_models(
 async def admin_prompts(request: Request):
     # Default prompts from ai_services.py
     default_prompts = {
-        "ad_base": """Identify segments in the transcript that match the Targets.
+        "ad_base": """Task: You are an expert data extraction system specialized in audio transcript analysis. 
+Analyze the transcript below and extract every single segment that matches the Targets.
 Targets: {targets}
 {custom_instr}
-Return a JSON array of objects with "start", "end", "label" (Ad/Promo/Intro/Outro), and "reason" (brief explanation).
-Example: [{"start": 0.0, "end": 10.0, "label": "Ad", "reason": "Sponsor read for XYZ"}]""",
-        "sponsor": "Sponsor messages, ad reads, promotional segments",
-        "promo": "Cross-promotions, plugs for other shows or content",
-        "summary": "Summarize the key points of this podcast episode in 3-5 bullet points."
+Strict Extraction Rules:
+1. CONTINUITY RULE: Once a target segment begins, it does NOT end when the speaker stops talking. If an outbound break announcement is followed by a long timestamp gap, silence, music cues, or placeholder text (like "OK", "Music", or brief filler words), you MUST include that gap as part of the advertisement segment.
+2. BOUNDARY RULE: An advertisement segment only ends when the core, non-promotional podcast topic or conversation actively resumes. 
+3. TIMESTAMP ACCURACY: The "end" timestamp for the JSON object must match the exact start time of the row where the main podcast topic returns.
+Output Format: Return ONLY a JSON array of objects with "start", "end", and "label" (Ad/Promo/Intro/Outro). Do not include markdown formatting or introductory text outside the JSON block.
+Example:
+[{"start": 1124.16, "end": 1154.60, "label": "Ad"}]
+"""
+
     }
     
     user = get_current_user(request)
@@ -1846,7 +1852,7 @@ async def add_subscription(
         # Fetch global defaults first
         print(f"Feed doesn't already exists in DB.")
         with get_db_connection() as conn:
-            app_settings = conn.execute("SELECT * FROM app_settings WHERE id = 1").fetchone()
+            app_settings = dict(conn.execute("SELECT * FROM app_settings WHERE id = 1").fetchone())
 
         print(f"app_settings: {app_settings}")
 
@@ -1869,24 +1875,33 @@ async def add_subscription(
 
         print(f"Created new sub: {new_sub}")
 
-        # Apply other global defaults immediately
-        sub_repo.update_settings(
-            new_sub.id,
-            remove_ads=bool(app_settings['default_remove_ads']),
-            remove_promos=bool(app_settings['default_remove_promos']),
-            remove_intros=bool(app_settings['default_remove_intros']),
-            remove_outros=bool(app_settings['default_remove_outros']),
-            custom_instructions=app_settings['default_custom_instructions'],
-            append_summary=bool(app_settings['default_ai_audio_summary']), # Mapped correctly? Yes
-            append_title_intro=bool(app_settings['default_append_title_intro']),
-            ai_rewrite_description=bool(app_settings['default_ai_rewrite_description']),
-            ai_audio_summary=bool(app_settings['default_ai_audio_summary']),
-            feed_url=feed_url,
-            retention_days=app_settings['default_retention_days'] or 30,
-            manual_retention_days=app_settings['default_manual_retention_days'] or 14,
-            retention_limit=retention_limit,
-            download_order=app_settings.get('default_download_order', 'newest')
-        )
+        try:
+            # Apply other global defaults immediately
+            sub_repo.update_settings(
+                new_sub.id,
+                remove_ads=bool(app_settings['default_remove_ads']),
+                remove_promos=bool(app_settings['default_remove_promos']),
+                remove_intros=bool(app_settings['default_remove_intros']),
+                remove_outros=bool(app_settings['default_remove_outros']),
+                custom_instructions=app_settings['default_custom_instructions'],
+                append_summary=bool(app_settings['default_ai_audio_summary']), # Mapped correctly? Yes
+                append_title_intro=bool(app_settings['default_append_title_intro']),
+                ai_rewrite_description=bool(app_settings['default_ai_rewrite_description']),
+                ai_audio_summary=bool(app_settings['default_ai_audio_summary']),
+                feed_url=feed_url,
+                retention_days=app_settings['default_retention_days'] or 30,
+                manual_retention_days=app_settings['default_manual_retention_days'] or 14,
+                retention_limit=retention_limit,
+                download_order=app_settings.get('default_download_order', 'newest')
+            )
+        except Exception as e:
+            logger.error(f"Error setting up subscription {new_sub.id}: {e}")
+            await send_notification_async(
+                EVENT_BREAKING_ERROR,
+                "Podcast setup failed",
+                f"A new podcast could not be set up: {e}",
+                severity="error",
+            )
 
         
         # All heavy lifting happens in background

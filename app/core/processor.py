@@ -27,11 +27,11 @@ class Processor:
     _active_task_ids = set()
     _queue_lock = asyncio.Lock()  # Prevent race conditions in process_queue
 
-    def __init__(self):
+    def __init__(self, model=None, diarize_model=None, device=None):
         self.ep_repo = EpisodeRepository()
         self.sub_repo = SubscriptionRepository()
         self.job_repo = JobRepository()
-        self.transcriber = Transcriber()
+        self.transcriber = Transcriber(model=model, diarize_model=diarize_model, device=device)
         self.ad_detector = AdDetector()
         self.rss_gen = RSSGenerator()
 
@@ -1266,11 +1266,33 @@ def start_processor_process():
     except Exception as e:
         print(f"Failed to set background priority: {e}")
 
-    # 2. Setup isolated event loop
+    # Reset startup flag to indicate loading in progress
+    from app.infra.database import get_db_connection
+    try:
+        with get_db_connection() as conn:
+            conn.execute("UPDATE app_settings SET startup_complete = 0 WHERE id = 1")
+            conn.commit()
+    except Exception as e:
+        print(f"Failed to reset startup flag: {e}")
+
+    # 2. Load WhisperX models before creating processor
+    from app.core.ai_services import load_whisperx_models
+    model, diarize_model, device = load_whisperx_models()
+
+    # Set startup flag to indicate models are loaded
+    try:
+        with get_db_connection() as conn:
+            conn.execute("UPDATE app_settings SET startup_complete = 1 WHERE id = 1")
+            conn.commit()
+    except Exception as e:
+        print(f"Failed to set startup flag: {e}")
+
+    # 3. Setup isolated event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    processor = Processor()
+
+    # 4. Create processor with preloaded models
+    processor = Processor(model=model, diarize_model=diarize_model, device=device)
     
     # 3. Handle stop signals gracefully
     stop_event = asyncio.Event()

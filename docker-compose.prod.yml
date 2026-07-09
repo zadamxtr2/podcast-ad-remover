@@ -7,6 +7,11 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    security_opt:
+      - seccomp:unconfined
     environment:
       - BASE_URL=http://your-server-ip:8000
       - SESSION_SECRET_KEY=replace-with-a-long-random-secret

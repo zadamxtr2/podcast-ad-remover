@@ -1,0 +1,28 @@
+When building on Ubuntu, you need to create a sandbox to build the app.
+
+From the project dir:
+
+1) python3 -m venv venv
+2) source venv/bin/activate
+3) pip install -r requirements.txt
+4) pip install -r requirements-dev.txt
+
+Need to run step 2 again after closing your terminal and opening it again.  Note that getting errors trying to build
+or download requirements means you need to do the above.
+
+
+
+Starting local experimental container from image in Ubuntu:
+
+docker run -d \
+  --name podcast-ad-remover-experimental \
+  -p 8000:8001 \
+  -v .podcast-ad-remover-volume:/data \
+  -e SESSION_SECRET_KEY="$(openssl rand -hex 32)" \
+  -e BASE_URL="http://localhost:8000" \
+  -e GEMINI_API_KEY="your_api_key" \
+  jdcb4/podcast-ad-remover:experimental
+
+
+Publishing an experimental build to docker:
+npm run docker:experimental -- --push --tag experimental --skip-verify

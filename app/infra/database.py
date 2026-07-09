@@ -310,6 +310,7 @@ def init_db():
         require_password_change INTEGER DEFAULT 0,
         initial_password TEXT,
         ip_allowlist TEXT,
+        startup_complete INTEGER DEFAULT 0,
         
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -320,6 +321,11 @@ def init_db():
 
     try:
         cursor.execute("ALTER TABLE app_settings ADD COLUMN summary_prompt_template TEXT")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE app_settings ADD COLUMN startup_complete INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass
     

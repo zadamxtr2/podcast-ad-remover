@@ -241,18 +241,18 @@
                     <div>
                         <label class="block text-sm font-medium text-text-secondary mb-2">Number of Chunks</label>
                         <input type="number" name="chunk_num_chunks"
-                            value="{{ settings.chunk_num_chunks or 10 }}"
-                            min="2" max="50"
+                            value="{{ settings.chunk_num_chunks or 3 }}"
+                            min="1" max="50"
                             class="input">
-                        <p class="text-xs text-text-muted mt-2">How many chunks to split the transcript into for AI analysis. Default: 10</p>
+                        <p class="text-xs text-text-muted mt-2">How many chunks to split the transcript into for AI analysis. Default: 3</p>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-text-secondary mb-2">Overlap Percent</label>
                         <input type="number" name="chunk_overlap_percent"
-                            value="{{ settings.chunk_overlap_percent or 25 }}"
+                            value="{{ settings.chunk_overlap_percent or 10 }}"
                             min="0" max="75"
                             class="input">
-                        <p class="text-xs text-text-muted mt-2">Percentage of overlap between adjacent chunks (0-75). Default: 25</p>
+                        <p class="text-xs text-text-muted mt-2">Percentage of overlap between adjacent chunks (0-75). Default: 10</p>
                     </div>
                 </div>
             </div>

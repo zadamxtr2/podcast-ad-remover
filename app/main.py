@@ -136,7 +136,7 @@ from app.api import subscriptions
 from app.api import audio_routes
 from app.api.v1.router import router as ai_api_router
 from app.web import router as web_router
-from app.web.middleware import feed_auth_middleware
+from app.web.middleware import feed_auth_middleware, startup_check_middleware
 from app.web.auth import auth_middleware
 from app.web.security_headers import SecurityHeadersMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -151,9 +151,10 @@ app = FastAPI(
 )
 
 # Add middleware (order matters - added in reverse of execution order)
-# Execution order: SecurityHeadersMiddleware -> SessionMiddleware -> auth_middleware -> feed_auth_middleware
+# Execution order: SecurityHeadersMiddleware -> SessionMiddleware -> auth_middleware -> feed_auth_middleware -> startup_check_middleware
 app.middleware("http")(feed_auth_middleware)
 app.middleware("http")(auth_middleware)
+app.middleware("http")(startup_check_middleware)
 app.add_middleware(
     SessionMiddleware, 
     secret_key=settings.SESSION_SECRET_KEY,
@@ -185,4 +186,20 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    from app.infra.database import get_db_connection
+    from fastapi import status
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT startup_complete FROM app_settings WHERE id = 1").fetchone()
+            startup_complete = row['startup_complete'] if row else False
+            if startup_complete:
+                return {"status": "healthy", "startup": "complete"}
+            else:
+                # Return 503 during startup so Docker healthcheck fails
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={"status": "starting", "startup": "loading_models"}
+                )
+    except Exception:
+        return {"status": "healthy", "startup": "unknown"}

@@ -9,10 +9,30 @@ docker run -d \
   --name podcast-ad-remover \
   -p 8000:8000 \
   -v ./data:/data \
+  --security-opt seccomp:unconfined \
   -e GEMINI_API_KEY=your_key_here \
   -e BASE_URL=http://your-server-ip:8000 \
   jdcb4/podcast-ad-remover:latest
 ```
+
+### AMD GPU Support
+
+For AMD GPU passthrough (e.g., Radeon 780M), add device mappings and seccomp unconfined (required for ctranslate2):
+
+```bash
+docker run -d \
+  --name podcast-ad-remover \
+  -p 8000:8000 \
+  -v ./data:/data \
+  --device /dev/dri:/dev/dri \
+  --device /dev/kfd:/dev/kfd \
+  --security-opt seccomp:unconfined \
+  -e GEMINI_API_KEY=your_key_here \
+  -e BASE_URL=http://your-server-ip:8000 \
+  jdcb4/podcast-ad-remover:latest
+```
+
+The default image uses CPU-only PyTorch. To use AMD GPU acceleration, you may need to install ZLUDA or ROCm-compatible PyTorch inside the container.
 
 For a production install, also set a unique `SESSION_SECRET_KEY`.
 If users access the app through HTTPS behind a reverse proxy, set `COOKIE_SECURE=true`.
@@ -32,12 +52,41 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+    security_opt:
+      - seccomp:unconfined
     environment:
       - GEMINI_API_KEY=your_key_here
       - BASE_URL=http://your-server-ip:8000
       - SESSION_SECRET_KEY=replace-with-a-long-random-secret
       - LOG_LEVEL=INFO
 ```
+
+### AMD GPU Support with Docker Compose
+
+For AMD GPU passthrough, add device mappings and seccomp unconfined (required for ctranslate2) to your compose file:
+
+```yaml
+services:
+  app:
+    image: jdcb4/podcast-ad-remover:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - GEMINI_API_KEY=your_key_here
+      - BASE_URL=http://your-server-ip:8000
+      - SESSION_SECRET_KEY=replace-with-a-long-random-secret
+      - LOG_LEVEL=INFO
+```
+
+Both `docker-compose.yml` (local development) and `docker-compose.prod.yml` (production) include these device mappings by default.
 
 Start it with:
 

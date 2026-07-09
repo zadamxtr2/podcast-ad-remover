@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = Field(None, description="OpenRouter API Key")
     LOG_LEVEL: str = "INFO"
     SESSION_SECRET_KEY: str = Field(DEFAULT_SESSION_SECRET_KEY, description="Secret key for session encryption")
+    HF_TOKEN: str | None = Field(None, description="Hugging Face Token")
     
     # Paths
     DATA_DIR: str = "/data"

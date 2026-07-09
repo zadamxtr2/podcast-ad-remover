@@ -1,8 +1,36 @@
 from fastapi import Request, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 import base64
 from app.infra.repository import FeedTokenRepository
 from app.web.auth_utils import verify_feed_password, verify_password
+
+async def startup_check_middleware(request: Request, call_next):
+    """
+    Middleware to block UI access during startup (model loading).
+    Allows health endpoint and static files to be accessed.
+    """
+    path = request.url.path
+    
+    # Allow health endpoint, static files, and API docs during startup
+    if path in ['/health', '/', '/api/docs', '/api/redoc'] or path.startswith('/static/') or path.startswith('/api/'):
+        return await call_next(request)
+    
+    # Check startup status
+    from app.infra.database import get_db_connection
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT startup_complete FROM app_settings WHERE id = 1").fetchone()
+            startup_complete = row['startup_complete'] if row else False
+            if not startup_complete:
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={"detail": "Application is starting up. Please wait a moment."}
+                )
+    except Exception:
+        # If we can't check the status, allow the request (fail open)
+        pass
+    
+    return await call_next(request)
 
 async def feed_auth_middleware(request: Request, call_next):
     """

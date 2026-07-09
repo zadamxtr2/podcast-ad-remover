@@ -1,13 +1,18 @@
 services:
   app:
     build: .
-    image: jdcb4/podcast-ad-remover:local
+    image: jdcb4/podcast-ad-remover:experimental
     restart: unless-stopped
     ports:
-      - '8000:8000'
+      - '8001:8000'
     volumes:
       - ./data:/data
       - .:/app
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    security_opt:
+      - seccomp:unconfined
     environment:
       - SESSION_SECRET_KEY=replace-with-a-long-random-secret
       - BASE_URL=http://localhost:8000
@@ -18,3 +23,11 @@ services:
       - LOG_LEVEL=INFO
       - COOKIE_SECURE=false
       - TRUST_PROXY_HEADERS=false
+      - HF_TOKEN=
+      - HSA_OVERRIDE_GFX_VERSION=11.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 30

@@ -7,6 +7,9 @@ import sys
 import gc
 import importlib.util
 import wave
+import os
+import whisperx
+import gc
 from typing import List, Dict
 from app.core.config import settings
 import httpx
@@ -53,10 +56,54 @@ class RateLimitError(Exception):
             # Per-minute limit: short 2-minute retry
             return datetime.now() + timedelta(minutes=2)
 
+def load_whisperx_models():
+    """Load WhisperX model and diarization pipeline for use at startup."""
+    runtime_settings = {}
+    try:
+        from app.infra.database import get_db_connection
+        with get_db_connection() as conn:
+            row = conn.execute("""
+                SELECT whisper_model, whisper_compute_type, whisper_cpu_threads, ffmpeg_threads
+                FROM app_settings WHERE id = 1
+            """).fetchone()
+            if row:
+                runtime_settings["whisper_model"] = row["whisper_model"] or "base"
+                runtime_settings["whisper_compute_type"] = row["whisper_compute_type"] or "float32"
+                runtime_settings["whisper_cpu_threads"] = int(row["whisper_cpu_threads"] or 0)
+                runtime_settings["ffmpeg_threads"] = int(row["ffmpeg_threads"] or 0)
+    except Exception as e:
+        logger.warning(f"Failed to fetch runtime settings, using defaults: {e}")
+
+    # device = "cpu"
+    device = "cuda"
+    compute_type = runtime_settings.get("whisper_compute_type") or "float32"
+    hf_token = settings.HF_TOKEN
+    idx = runtime_settings.get("whisper_model") or "base"
+    cpu_threads = int(runtime_settings.get("whisper_cpu_threads") or 0)
+
+    print("Loading WhisperX Base Model...")
+    model = whisperx.load_model(idx, device, compute_type=compute_type, use_auth_token=hf_token, threads=cpu_threads)
+
+    # Pre-load the diarization pipeline if a token is provided
+    if hf_token:
+        print("Loading Pyannote Diarization Pipeline...")
+        diarize_model = whisperx.diarize.DiarizationPipeline(token=hf_token, device=device)
+    else:
+        diarize_model = None
+        print("WARNING: HF_TOKEN not found. Diarization will be skipped.")
+
+    return model, diarize_model, device
+
 class Transcriber:
-    def __init__(self):
-        self.model = None
+    def __init__(self, model=None, diarize_model=None, device=None):
+        self.model = model
+        self.diarize_model = diarize_model
         self.model_config = None
+        self.device = device or "cuda"
+        
+        # If models are not provided, load them (backward compatibility)
+        if self.model is None:
+            self.model, self.diarize_model, self.device = load_whisperx_models()
 
     def _load_runtime_settings(self) -> Dict:
         runtime = {
@@ -124,9 +171,83 @@ class Transcriber:
             logger.info(f"Model loaded in {load_duration:.2f}s")
 
     def transcribe(self, audio_path: str, progress_callback=None) -> Dict:
-        from app.core.audio import AudioProcessor
 
         runtime_settings = self._load_runtime_settings()
+        # logger.info("Using faster-whisper for transcription")
+        # return self._transcribe_faster_whisper(audio_path, progress_callback, runtime_settings)
+        logger.info("Using WhisperX for transcription")
+        return self.whisperx_transcribe(audio_path)
+
+    def whisperx_transcribe(self, chunk_path: str, beam_size: int = 5) -> dict:
+        """
+        Drop-in replacement for faster-whisper's self.model.transcribe()
+        """
+        # 1. Load Audio
+        audio = whisperx.load_audio(chunk_path)
+
+        # 2. Transcribe (batch_size=1 is optimal for CPU, 16 good for cuda)
+        # Note: WhisperX doesn't directly expose beam_size in the transcribe call the same way,
+        # but its internal faster-whisper engine handles the accuracy natively.
+        result = self.model.transcribe(audio, batch_size=16)
+        language = result["language"]
+
+        logger.info(f"WhisperX transcription done, result: {result}")
+
+        # 3. Align (Crucial for fixing timestamps so diarization is accurate)
+        align_model, metadata = whisperx.load_align_model(language_code=language, device=self.device)
+        result = whisperx.align(
+            result["segments"],
+            align_model,
+            metadata,
+            audio,
+            self.device,
+            return_char_alignments=False
+        )
+
+        logger.info(f"WhisperX alignment done, result: {result}")
+
+        # Clean up alignment model memory (helpful on CPU)
+        del align_model
+        gc.collect()
+
+        # 4. Diarize (Identify Speakers)
+        if self.diarize_model:
+            logger.info(f"Diarize process about to start...")
+            diarize_segments = self.diarize_model(audio, min_speakers = 2, max_speakers = 10)
+            logger.info(f"Diarize process complete, assigning word speakers...")
+            result = whisperx.assign_word_speakers(diarize_segments, result)
+            logger.info(f"Assigning word speakers completed, result: {result}")
+
+        # 5. Format output as a dictionary to match the app's expected return type
+        formatted_segments = []
+        full_text = []
+
+        for seg in result["segments"]:
+            speaker_label = seg.get("speaker", "UNKNOWN")
+
+            # Prepend the speaker tag directly to the text so your LLM sees it instantly
+            # e.g., "[SPEAKER_00] And now a word from our sponsor."
+            combined_text = f"[{speaker_label}] {seg.get('text', '').strip()}"
+            full_text.append(combined_text)
+
+            formatted_segments.append({
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": combined_text,
+                "speaker": speaker_label
+            })
+
+        # Return a single dictionary containing the full text, segments, and language
+        return {
+            "text": " ".join(full_text),
+            "segments": formatted_segments,
+            "language": language
+        }
+
+    def _transcribe_faster_whisper(self, audio_path: str, progress_callback=None, runtime_settings: Dict = None) -> Dict:
+        from app.core.audio import AudioProcessor
+
+        runtime_settings = runtime_settings or self._load_runtime_settings()
         self.load_model(runtime_settings)
         ffmpeg_threads = int(runtime_settings.get("ffmpeg_threads") or 0)
 
@@ -237,8 +358,11 @@ class Transcriber:
 
                 logger.debug(f"Chunk {i} boundaries: {merge_start:.2f}s to {merge_end:.2f}s")
 
-                # Transcribe chunk
-                segments_generator, info = self.model.transcribe(chunk_path, beam_size=5)
+                # Transcribe chunk using faster-whisper
+                # segments_generator, info = self.model.transcribe(chunk_path, beam_size=5)
+
+                # Transcribe chunk using WhisperX
+                segments_generator, info = self.whisperx_transcribe(chunk_path, beam_size=5)
 
                 chunk_segments_count = 0
                 for segment in segments_generator:
@@ -288,7 +412,6 @@ class Transcriber:
             if os.path.exists(clean_audio_path):
                 os.remove(clean_audio_path)
             logger.info("Cleaned up temporary chunk files.")
-
 
 class LLMProvider:
     def generate(self, prompt: str) -> str:
@@ -642,8 +765,8 @@ class AdDetector:
             }
 
         # Load chunking settings from database with defaults
-        num_chunks = self.settings.get('chunk_num_chunks') or 10
-        overlap_percent = (self.settings.get('chunk_overlap_percent') or 25) / 100.0  # Convert percent to decimal
+        num_chunks = self.settings.get('chunk_num_chunks') or 1
+        overlap_percent = (self.settings.get('chunk_overlap_percent') or 10) / 100.0  # Convert percent to decimal
 
         # Chunk the transcript using configured settings
         chunks = self._chunk_transcript(transcript, num_chunks=num_chunks, overlap_percent=overlap_percent)
@@ -669,9 +792,12 @@ class AdDetector:
             # Build Prompt
             prompt = self._build_ad_prompt(options, text_data, whitelist_mode=whitelist_mode)
 
+            logger.info(f"Prompt: {prompt}")
+
             # Execute
             try:
                 response_text = provider.generate(prompt)
+                logger.info(f"Response: {response_text}")
                 raw_segments = self._parse_ad_response(response_text)
                 chunk_results.append(raw_segments)
                 logger.info(f"Chunk {i+1} detected {len(raw_segments)} segments")
@@ -716,9 +842,9 @@ class AdDetector:
         targets = []
         if subscription_settings:
             if subscription_settings.get('remove_ads'):
-                targets.append(self.settings.get('ad_target_sponsor') or 'Sponsor messages, Ad reads')
+                targets.append(self.settings.get('ad_target_sponsor') or 'Sponsor messages, Ad reads, commercials, Outbound break announcements (e.g., "We\'ll be right back") and inbound returns (e.g., "Welcome back").')
             if subscription_settings.get('remove_promos'):
-                targets.append(self.settings.get('ad_target_promo') or 'Cross-promotions, plugs for other shows')
+                targets.append(self.settings.get('ad_target_promo') or 'Show bumpers, Cross-promotions, plugs for other shows/content')
             if subscription_settings.get('remove_intros'):
                 targets.append(self.settings.get('ad_target_intro') or 'Intro music, opening segments')
             if subscription_settings.get('remove_outros'):
@@ -760,13 +886,13 @@ class AdDetector:
         # Fetch targets with safety defaults
         targets = []
         if options.get("remove_ads"):
-            targets.append(self.settings.get('ad_target_sponsor') or 'Sponsor messages')
+            targets.append((self.settings.get('ad_target_sponsor') or 'Sponsor messages, Ad reads, commercials, Outbound break announcements (e.g., "We\'ll be right back") and inbound returns (e.g., "Welcome back").').strip())
         if options.get("remove_promos"):
-            targets.append(self.settings.get('ad_target_promo') or 'Promos')
+            targets.append((self.settings.get('ad_target_promo') or 'Show bumpers, Cross-promotions, plugs for other shows/content').strip())
         if options.get("remove_intros"):
-            targets.append(self.settings.get('ad_target_intro') or 'Intro')
+            targets.append((self.settings.get('ad_target_intro') or 'Intro music, opening segments').strip())
         if options.get("remove_outros"):
-            targets.append(self.settings.get('ad_target_outro') or 'Outro')
+            targets.append((self.settings.get('ad_target_outro') or 'Outro music, closing segments').strip())
 
         # Check if reason should be included in prompt
         include_reason = self.settings.get('include_reason')
@@ -775,18 +901,36 @@ class AdDetector:
 
         if include_reason:
             default_base = """
-            Identify segments in the transcript that match the Targets.
+            Task: You are an expert data extraction system specialized in audio transcript analysis. 
+            Analyze the transcript below and extract every single segment that matches the Targets.
             Targets: {targets}
+            
             {custom_instr}
-            Return a JSON array of objects with "start", "end", "label" (Ad/Promo/Intro/Outro), and "reason" (brief explanation).
+            
+            Strict Extraction Rules:
+            1. CONTINUITY RULE: Once a target segment begins, it does NOT end when the speaker stops talking. If an outbound break announcement is followed by a long timestamp gap, silence, music cues, or placeholder text (like "OK", "Music", or brief filler words), you MUST include that gap as part of the advertisement segment.
+            2. BOUNDARY RULE: An advertisement segment only ends when the core, non-promotional podcast topic or conversation actively resumes. 
+            3. TIMESTAMP ACCURACY: The "end" timestamp for the JSON object must match the exact start time of the row where the main podcast topic returns.
+            
+            Output Format: Return ONLY a JSON array of objects with "start", "end", and "label" (Ad/Promo/Intro/Outro). Do not include markdown formatting or introductory text outside the JSON block.
+            
             Example: [{{"start": 0.0, "end": 10.0, "label": "Ad", "reason": "Sponsor read for XYZ"}}]
             """
         else:
             default_base = """
-            Identify segments in the transcript that match the Targets.
+            Task: You are an expert data extraction system specialized in audio transcript analysis. 
+            Analyze the transcript below and extract every single segment that matches the Targets.
             Targets: {targets}
+            
             {custom_instr}
-            Return a JSON array of objects with "start", "end", and "label" (Ad/Promo/Intro/Outro).
+            
+            Strict Extraction Rules:
+            1. CONTINUITY RULE: Once a target segment begins, it does NOT end when the speaker stops talking. If an outbound break announcement is followed by a long timestamp gap, silence, music cues, or placeholder text (like "OK", "Music", or brief filler words), you MUST include that gap as part of the advertisement segment.
+            2. BOUNDARY RULE: An advertisement segment only ends when the core, non-promotional podcast topic or conversation actively resumes. 
+            3. TIMESTAMP ACCURACY: The "end" timestamp for the JSON object must match the exact start time of the row where the main podcast topic returns.
+            
+            Output Format: Return ONLY a JSON array of objects with "start", "end", and "label" (Ad/Promo/Intro/Outro). Do not include markdown formatting or introductory text outside the JSON block.
+            
             Example: [{{"start": 0.0, "end": 10.0, "label": "Ad"}}]
             """
 
@@ -814,7 +958,11 @@ Example: [{"start": 10.0, "end": 300.0, "label": "Content"}]
 
         # Use manual replacement instead of .format() to avoid breaking on JSON examples
         try:
-            prompt = base.replace("{targets}", "\n".join(targets)).replace("{custom_instr}", custom)
+            prompt = base.replace("{targets}", ",".join(targets))
+            if custom:
+                prompt = prompt.replace("{custom_instr}", custom)
+            else:
+                prompt = prompt.replace("{custom_instr}", "")
             return prompt + whitelist_addendum + "\n\nTranscript:\n" + transcript_text
         except Exception as e:
              logger.warning(f"Prompt formatting failed: {e}")

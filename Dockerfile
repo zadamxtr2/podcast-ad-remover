@@ -11,7 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/conda/envs/py_3.10/bin:${PATH}"
 
-# Install runtime system dependencies (ffmpeg) and build tools (cmake)
+# Install runtime system dependencies (ffmpeg), build tools (cmake), and audio/video headers
+# required to compile torchaudio directly from C++ source code.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
@@ -19,10 +20,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     curl \
     jq \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
+    sox \
+    libsox-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip, setuptools, and wheel globally to ensure it understands modern wheel tags
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+# Upgrade pip, setuptools, and wheel globally, and add ninja to significantly speed up C++ compilation
+RUN python -m pip install --no-cache-dir --upgrade pip "setuptools<70.0.0" wheel ninja
 
 WORKDIR /build
 
@@ -56,22 +67,29 @@ ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:/opt/rocm/lib:/opt/rocm/lib
 # Install the specific versions of faster-whisper, pyannote, transformers, and ffmpeg-python
 # - Pin numpy to <1.23 so they don't upgrade it and break the base image's numba package
 # - Pin transformers to 4.36.2 to perfectly match the PyTorch 2.1.2 era (preventing >=2.4 requirement errors)
-RUN python -m pip install --no-cache-dir pandas nltk "pyannote.audio==3.4.0" "faster-whisper==1.2.1" "transformers==4.36.2" ffmpeg-python "numpy<1.23"
+# - Pin setuptools to <70.0.0 to prevent it from deleting the pkg_resources module needed for C++ compiling
+RUN python -m pip install --no-cache-dir pandas nltk "pyannote.audio==3.4.0" "faster-whisper==1.2.1" "transformers==4.36.2" ffmpeg-python "numpy<1.23" "setuptools<70.0.0"
 
 # Install WhisperX WITHOUT dependencies (Crucial: so it doesn't overwrite our ROCm PyTorch with an NVIDIA one!)
 RUN python -m pip install --no-cache-dir --no-deps "whisperx==3.7.4"
 
 # Install your application's Python dependencies
 COPY requirements.txt requirements-tts.txt ./
-# Pin numpy one last time during the requirements install to be absolutely bulletproof
-RUN python -m pip install --no-cache-dir -r requirements.txt "numpy<1.23" \
-    && if [ "$INSTALL_TTS" = "1" ]; then python -m pip install --no-cache-dir -r requirements-tts.txt "numpy<1.23"; fi
+# Pin numpy and setuptools one last time during the requirements install to be absolutely bulletproof
+RUN python -m pip install --no-cache-dir -r requirements.txt "numpy<1.23" "setuptools<70.0.0" \
+    && if [ "$INSTALL_TTS" = "1" ]; then python -m pip install --no-cache-dir -r requirements-tts.txt "numpy<1.23" "setuptools<70.0.0"; fi
 
-# FORCE REPLACE torchaudio with the CPU version as the absolute final step.
-# Because pip inevitably pulls the CUDA version of torchaudio during the dependency installations,
-# we surgically remove it and drop in the CPU version with --no-deps to prevent it from ruining our AMD PyTorch!
+# FORCE REPLACE torchaudio by compiling it from GitHub source!
+# PyPI doesn't host source distributions for torchaudio, so we clone it directly.
+# Compiling directly from the v2.1.2 tag guarantees 100% C++ ABI compatibility with AMD's PyTorch.
 RUN python -m pip uninstall -y torchaudio \
-    && python -m pip install --no-cache-dir --no-deps torchaudio==2.1.2+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+    && python -m pip install --no-cache-dir "setuptools<70.0.0" \
+    && git clone --depth 1 --branch v2.1.2 https://github.com/pytorch/audio.git /tmp/torchaudio \
+    && cd /tmp/torchaudio \
+    && BUILD_SOX=1 python setup.py bdist_wheel \
+    && python -m pip install --no-cache-dir --no-deps dist/*.whl \
+    && cd / \
+    && rm -rf /tmp/torchaudio
 
 # Copy application code
 COPY . .

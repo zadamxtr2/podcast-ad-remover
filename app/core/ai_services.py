@@ -82,12 +82,12 @@ def load_whisperx_models():
     cpu_threads = int(runtime_settings.get("whisper_cpu_threads") or 0)
 
     print("Loading WhisperX Base Model...")
-    model = whisperx.load_model(idx, device, compute_type=compute_type, use_auth_token=hf_token, threads=cpu_threads)
+    model = whisperx.load_model(idx, device, compute_type=compute_type, threads=cpu_threads)
 
     # Pre-load the diarization pipeline if a token is provided
     if hf_token:
         print("Loading Pyannote Diarization Pipeline...")
-        diarize_model = whisperx.diarize.DiarizationPipeline(token=hf_token, device=device)
+        diarize_model = whisperx.diarize.DiarizationPipeline(use_auth_token=hf_token, device=device)
     else:
         diarize_model = None
         print("WARNING: HF_TOKEN not found. Diarization will be skipped.")

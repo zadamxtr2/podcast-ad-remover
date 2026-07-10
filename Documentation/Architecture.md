@@ -13,7 +13,7 @@ The application is intentionally simple: one web app, one SQLite database, local
 - Jinja templates for the server-rendered UI.
 - SQLite for application state.
 - FFmpeg for audio processing.
-- Whisper/faster-whisper for local transcription.
+- WhisperX for local transcription.
 - Gemini, OpenAI, Anthropic, or OpenRouter for LLM-backed segment detection and summaries.
 - Piper or Gemini TTS for optional spoken title intros and audio summaries.
 - Tailwind CSS for styling.

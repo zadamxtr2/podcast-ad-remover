@@ -79,10 +79,14 @@ These are configured from the Admin UI rather than environment variables:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `whisper_cpu_threads` | Faster-Whisper CPU thread cap. `0` uses the library default. | `0` |
+| `whisper_cpu_threads` | WhisperX CPU thread cap. `0` uses the library default. | `0` |
 | `ffmpeg_threads` | FFmpeg thread cap. `0` lets FFmpeg choose automatically. | `0` |
-| `unload_whisper_after_job` | Unload the local Whisper model after the queue empties to reduce idle RAM. | `0` |
+| `unload_whisper_after_job` | Unload the local WhisperX model after the queue empties to reduce idle RAM. | `0` |
 | `whisper_compute_type` | Whisper compute type for resource tuning: `float32`, `float16`, or `int8`. | `float32` |
+| `enable_diarization` | Enable speaker diarization to identify different speakers in transcripts. Requires HF token. | `0` |
+| `hf_token` | Hugging Face access token for speaker diarization model. Required if diarization is enabled. | empty |
+| `min_speakers` | Minimum number of speakers to detect during diarization. `0` for auto-detection. | `1` |
+| `max_speakers` | Maximum number of speakers to detect during diarization. `0` for auto-detection. | `10` |
 | `ai_api_enabled` | Enable the token-protected AI-facing REST API under `/api/v1`. | `0` |
 | `ai_api_default_requests_per_minute` | Default per-token minute limit for authenticated AI API requests. | `60` |
 | `ai_api_default_requests_per_day` | Default per-token daily limit for authenticated AI API requests. | `1000` |

@@ -64,12 +64,17 @@ class Transcriber:
             "whisper_compute_type": "float32",
             "whisper_cpu_threads": 0,
             "ffmpeg_threads": 0,
+            "enable_diarization": 0,
+            "hf_token": None,
+            "min_speakers": 1,
+            "max_speakers": 10,
         }
         try:
             from app.infra.database import get_db_connection
             with get_db_connection() as conn:
                 row = conn.execute("""
-                    SELECT whisper_model, whisper_compute_type, whisper_cpu_threads, ffmpeg_threads
+                    SELECT whisper_model, whisper_compute_type, whisper_cpu_threads, ffmpeg_threads,
+                           enable_diarization, hf_token, min_speakers, max_speakers
                     FROM app_settings WHERE id = 1
                 """).fetchone()
                 if row:
@@ -77,6 +82,10 @@ class Transcriber:
                     runtime["whisper_compute_type"] = row["whisper_compute_type"] or "float32"
                     runtime["whisper_cpu_threads"] = int(row["whisper_cpu_threads"] or 0)
                     runtime["ffmpeg_threads"] = int(row["ffmpeg_threads"] or 0)
+                    runtime["enable_diarization"] = int(row["enable_diarization"] or 0)
+                    runtime["hf_token"] = row["hf_token"]
+                    runtime["min_speakers"] = int(row["min_speakers"] or 1)
+                    runtime["max_speakers"] = int(row["max_speakers"] or 10)
         except Exception as e:
             logger.warning(f"Failed to fetch runtime settings, using defaults: {e}")
         return runtime
@@ -84,40 +93,77 @@ class Transcriber:
     def unload_model(self):
         if self.model is None:
             return
-        logger.info("Unloading Faster-Whisper model from memory.")
+        logger.info("Unloading WhisperX model from memory.")
         self.model = None
         self.model_config = None
         gc.collect()
 
+    def _perform_diarization(self, audio, result, hf_token, min_speakers, max_speakers) -> Dict:
+        """Perform speaker diarization on transcribed audio."""
+        try:
+            from whisperx.diarize import DiarizationPipeline
+            
+            if not hf_token:
+                logger.warning("Diarization requested but no HF token provided. Skipping diarization.")
+                return result
+            
+            logger.info("Starting speaker diarization...")
+            
+            # Initialize diarization pipeline
+            diarize_model = DiarizationPipeline(
+                token=hf_token,
+                device="cpu",
+                cache_dir=settings.MODELS_DIR
+            )
+            
+            # Perform diarization
+            diarize_segments = diarize_model(
+                audio,
+                min_speakers=min_speakers if min_speakers > 0 else None,
+                max_speakers=max_speakers if max_speakers > 0 else None
+            )
+            
+            # Assign speakers to words
+            result = whisperx.assign_word_speakers(diarize_segments, result)
+            
+            logger.info("Diarization complete. Speaker labels assigned to segments.")
+            
+            # Clean up diarization model
+            del diarize_model
+            gc.collect()
+            
+            return result
+        except Exception as e:
+            logger.error(f"Diarization failed: {e}. Continuing without speaker labels.")
+            return result
+
     def load_model(self, runtime_settings: Dict | None = None):
         runtime_settings = runtime_settings or self._load_runtime_settings()
         idx = runtime_settings.get("whisper_model") or "base"
-        compute_type = runtime_settings.get("whisper_compute_type") or "float32"
+        compute_type = runtime_settings.get("whisper_compute_type") or "int8"
         cpu_threads = int(runtime_settings.get("whisper_cpu_threads") or 0)
         desired_config = (idx, cpu_threads, compute_type)
         if self.model and self.model_config != desired_config:
-            logger.info("Whisper settings changed; reloading Faster-Whisper model.")
+            logger.info("Whisper settings changed; reloading WhisperX model.")
             self.unload_model()
 
         if not self.model:
-            logger.info(f"Loading Faster-Whisper model: {idx} (Download Root: {settings.MODELS_DIR})")
+            logger.info(f"Loading WhisperX model: {idx} (Download Root: {settings.MODELS_DIR})")
             logger.info(f"Using {compute_type} compute type for optimization.")
             if cpu_threads > 0:
-                logger.info(f"Limiting Faster-Whisper CPU threads to {cpu_threads}.")
+                logger.info(f"Limiting WhisperX CPU threads to {cpu_threads}.")
 
             import time
             start_load = time.time()
 
+            import whisperx
             model_kwargs = {
                 "device": "cpu",
                 "compute_type": compute_type,
                 "download_root": settings.MODELS_DIR,
             }
-            if cpu_threads > 0:
-                model_kwargs["cpu_threads"] = cpu_threads
 
-            import faster_whisper
-            self.model = faster_whisper.WhisperModel(idx, **model_kwargs)
+            self.model = whisperx.load_model(idx, **model_kwargs)
             self.model_config = desired_config
 
             load_duration = time.time() - start_load
@@ -129,6 +175,10 @@ class Transcriber:
         runtime_settings = self._load_runtime_settings()
         self.load_model(runtime_settings)
         ffmpeg_threads = int(runtime_settings.get("ffmpeg_threads") or 0)
+        enable_diarization = int(runtime_settings.get("enable_diarization") or 0)
+        hf_token = runtime_settings.get("hf_token")
+        min_speakers = int(runtime_settings.get("min_speakers") or 1)
+        max_speakers = int(runtime_settings.get("max_speakers") or 10)
 
         # Get total duration for progress calculation
         audio_duration = AudioProcessor.get_duration(audio_path)
@@ -139,7 +189,9 @@ class Transcriber:
         chunk_threshold = 1200.0
         if audio_duration > chunk_threshold:
             logger.info("File exceeds duration threshold. Using chunked transcription.")
-            return self._transcribe_chunked(audio_path, audio_duration, progress_callback, ffmpeg_threads=ffmpeg_threads)
+            return self._transcribe_chunked(audio_path, audio_duration, progress_callback, ffmpeg_threads=ffmpeg_threads,
+                                            enable_diarization=enable_diarization, hf_token=hf_token,
+                                            min_speakers=min_speakers, max_speakers=max_speakers)
 
         # Prepare clean audio for transcription to avoid crashes with multi-stream files (MJPEG etc)
         # We use a temporary file for the clean audio
@@ -147,50 +199,69 @@ class Transcriber:
         AudioProcessor.prepare_for_transcription(audio_path, clean_audio_path, ffmpeg_threads=ffmpeg_threads)
 
         try:
-            # faster-whisper returns a generator
-            # We transcribe the CLEAN audio path
-            segments_generator, info = self.model.transcribe(
-                clean_audio_path,
-                beam_size=5
-            )
+            import whisperx
+            # Load audio using WhisperX
+            audio = whisperx.load_audio(clean_audio_path)
+            
+            # Transcribe using WhisperX
+            result = self.model.transcribe(audio, batch_size=16)
+            
+            logger.info(f"Detected language: {result.get('language', 'unknown')}")
 
-            logger.info(f"Detected language: {info.language} with probability {info.language_probability}")
+            # Perform alignment (required for diarization)
+            if enable_diarization:
+                logger.info("Aligning segments for diarization...")
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=result["language"], 
+                    device="cpu"
+                )
+                result = whisperx.align(
+                    result["segments"], 
+                    model_a, 
+                    metadata, 
+                    audio, 
+                    "cpu", 
+                    return_char_alignments=False
+                )
+                del model_a
+                gc.collect()
+                
+                # Perform diarization
+                result = self._perform_diarization(audio, result, hf_token, min_speakers, max_speakers)
 
             segments_result = []
-
-            # Helper to convert segment to dict
-            def segment_to_dict(seg):
-                return {
-                    "id": seg.id,
-                    "seek": seg.seek,
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text,
-                    "tokens": seg.tokens,
-                    "temperature": seg.temperature,
-                    "avg_logprob": seg.avg_logprob,
-                    "compression_ratio": seg.compression_ratio,
-                    "no_speech_prob": seg.no_speech_prob
+            
+            # Convert WhisperX segments to our format
+            for i, segment in enumerate(result["segments"]):
+                seg_dict = {
+                    "id": i,
+                    "seek": 0,
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"],
+                    "tokens": [],
+                    "temperature": 0.0,
+                    "avg_logprob": 0.0,
+                    "compression_ratio": 0.0,
+                    "no_speech_prob": 0.0
                 }
-
-            # Iterate generator
-            for segment in segments_generator:
+                # Add speaker information if available
+                if "speaker" in segment:
+                    seg_dict["speaker"] = segment["speaker"]
+                segments_result.append(seg_dict)
+                
                 if progress_callback:
-                    # Progress based on segment end time
-                    progress_callback(segment.end, audio_duration)
+                    progress_callback(segment["end"], audio_duration)
 
-                # logger.info(f"Segment: {segment.start:.2f}s - {segment.end:.2f}s")
-                segments_result.append(segment_to_dict(segment))
-
-            result = {
+            final_result = {
                 "text": "".join([s['text'] for s in segments_result]),
                 "segments": segments_result,
-                "language": info.language
+                "language": result.get('language', 'en')
             }
 
             logger.info(f"Transcription complete. Found {len(segments_result)} segments.")
 
-            return result
+            return final_result
         finally:
             # Clean up temporary audio file
             if os.path.exists(clean_audio_path):
@@ -200,8 +271,11 @@ class Transcriber:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp audio: {e}")
 
-    def _transcribe_chunked(self, audio_path: str, total_duration: float, progress_callback=None, ffmpeg_threads: int = 0) -> Dict:
+    def _transcribe_chunked(self, audio_path: str, total_duration: float, progress_callback=None, 
+                           ffmpeg_threads: int = 0, enable_diarization: int = 0, 
+                           hf_token: str = None, min_speakers: int = 1, max_speakers: int = 10) -> Dict:
         from app.core.audio import AudioProcessor
+        import whisperx
 
         # Chunk settings
         chunk_duration = 1200.0 # 20 mins
@@ -218,6 +292,7 @@ class Transcriber:
             logger.info(f"Created {len(chunk_paths)} chunks for processing.")
 
             all_segments = []
+            detected_language = "en"
 
             # Stage 3: Process each chunk
             for i, chunk_path in enumerate(chunk_paths):
@@ -237,29 +312,34 @@ class Transcriber:
 
                 logger.debug(f"Chunk {i} boundaries: {merge_start:.2f}s to {merge_end:.2f}s")
 
-                # Transcribe chunk
-                segments_generator, info = self.model.transcribe(chunk_path, beam_size=5)
+                # Load and transcribe chunk using WhisperX
+                audio = whisperx.load_audio(chunk_path)
+                result = self.model.transcribe(audio, batch_size=16)
+                
+                # Capture language from first chunk
+                if i == 0 and result.get('language'):
+                    detected_language = result['language']
 
                 chunk_segments_count = 0
-                for segment in segments_generator:
+                for segment in result["segments"]:
                     # Globalize segment timestamps
-                    seg_start = segment.start + global_start_time
-                    seg_end = segment.end + global_start_time
+                    seg_start = segment["start"] + global_start_time
+                    seg_end = segment["end"] + global_start_time
 
                     # Filter based on merge boundaries
                     if seg_start >= merge_start and seg_start < merge_end:
                         # Convert to dict and update timestamps
                         seg_dict = {
                             "id": len(all_segments), # New ID for merged list
-                            "seek": segment.seek, # seek is relative to chunk, maybe not useful merged
+                            "seek": 0,
                             "start": seg_start,
                             "end": seg_end,
-                            "text": segment.text,
-                            "tokens": segment.tokens,
-                            "temperature": segment.temperature,
-                            "avg_logprob": segment.avg_logprob,
-                            "compression_ratio": segment.compression_ratio,
-                            "no_speech_prob": segment.no_speech_prob
+                            "text": segment["text"],
+                            "tokens": [],
+                            "temperature": 0.0,
+                            "avg_logprob": 0.0,
+                            "compression_ratio": 0.0,
+                            "no_speech_prob": 0.0
                         }
                         all_segments.append(seg_dict)
                         chunk_segments_count += 1
@@ -270,11 +350,51 @@ class Transcriber:
 
                 logger.info(f"Chunk {i} complete. Added {chunk_segments_count} segments.")
 
+            # Stage 4: Perform diarization on full audio if enabled
+            if enable_diarization:
+                logger.info("Performing diarization on full audio...")
+                full_audio = whisperx.load_audio(clean_audio_path)
+                
+                # Create result dict for alignment
+                result_for_alignment = {
+                    "segments": all_segments,
+                    "language": detected_language
+                }
+                
+                # Align segments
+                logger.info("Aligning segments for diarization...")
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=detected_language,
+                    device="cpu"
+                )
+                aligned_result = whisperx.align(
+                    result_for_alignment["segments"],
+                    model_a,
+                    metadata,
+                    full_audio,
+                    "cpu",
+                    return_char_alignments=False
+                )
+                del model_a
+                gc.collect()
+                
+                # Perform diarization
+                diarized_result = self._perform_diarization(full_audio, aligned_result, hf_token, min_speakers, max_speakers)
+                
+                # Update all_segments with speaker information
+                for i, segment in enumerate(diarized_result["segments"]):
+                    if i < len(all_segments):
+                        if "speaker" in segment:
+                            all_segments[i]["speaker"] = segment["speaker"]
+                        # Update timestamps from alignment
+                        all_segments[i]["start"] = segment["start"]
+                        all_segments[i]["end"] = segment["end"]
+
             # Final result
             result = {
                 "text": "".join([s['text'] for s in all_segments]),
                 "segments": all_segments,
-                "language": "en" # Default or detected from first chunk?
+                "language": detected_language
             }
 
             logger.info(f"Chunked transcription complete. Found {len(all_segments)} total segments.")

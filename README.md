@@ -2,7 +2,7 @@
 
 Podcast Ad Remover is a self-hosted app for downloading podcast episodes, removing ad and promo segments, and publishing replacement RSS feeds that can be subscribed to from a normal podcast client.
 
-It is built for homelab-style deployment: one Docker container, SQLite state under `/data`, local transcription with Whisper/faster-whisper, FFmpeg audio editing, and LLM-backed ad detection through Gemini, OpenAI, Anthropic, or OpenRouter.
+It is built for homelab-style deployment: one Docker container, SQLite state under `/data`, local transcription with WhisperX, FFmpeg audio editing, and LLM-backed ad detection through Gemini, OpenAI, Anthropic, or OpenRouter.
 
 ## Current UI
 
@@ -36,7 +36,7 @@ The admin queue shows active jobs, queued/retry states, disk usage, next feed ch
 - Global podcast library with per-user My Podcasts lists and one shared copy of each podcast.
 - Podcast ownership rules for per-podcast settings, with admin owner reassignment and admin-only global deletion.
 - Automatic episode download and retention controls.
-- Local transcription with Whisper/faster-whisper.
+- Local transcription with WhisperX.
 - LLM-based ad, promo, intro, and outro detection.
 - FFmpeg-based audio cutting and rewritten RSS feed generation.
 - Per-podcast feeds plus a unified feed.
@@ -48,7 +48,7 @@ The admin queue shows active jobs, queued/retry states, disk usage, next feed ch
 - Optional feed/audio authentication with generated feed tokens.
 - Optional public read-only subscribe page for frictionless podcast-client setup.
 - Optional Apprise-backed admin notifications for access requests, new podcasts, completed episodes, and breaking processing errors.
-- Resource controls for Whisper CPU threads, FFmpeg threads, and unloading Whisper after jobs.
+- Resource controls for WhisperX CPU threads, FFmpeg threads, and unloading WhisperX after jobs.
 
 ## Quick Start
 

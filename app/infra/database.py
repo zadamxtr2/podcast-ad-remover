@@ -493,7 +493,13 @@ Transcript Context: {transcript_context}""",))
         "ALTER TABLE app_settings ADD COLUMN chunk_overlap_percent INTEGER DEFAULT 25",
 
         # Include reason in ad detection prompt
-        "ALTER TABLE app_settings ADD COLUMN include_reason INTEGER DEFAULT 1"
+        "ALTER TABLE app_settings ADD COLUMN include_reason INTEGER DEFAULT 1",
+
+        # WhisperX diarization settings
+        "ALTER TABLE app_settings ADD COLUMN enable_diarization INTEGER DEFAULT 0",
+        "ALTER TABLE app_settings ADD COLUMN hf_token TEXT",
+        "ALTER TABLE app_settings ADD COLUMN min_speakers INTEGER DEFAULT 1",
+        "ALTER TABLE app_settings ADD COLUMN max_speakers INTEGER DEFAULT 10"
     ]
     
     for sql in migrations:

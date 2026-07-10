@@ -5,11 +5,15 @@ FROM rocm/pytorch:rocm6.1_ubuntu22.04_py3.10_pytorch_2.1.2
 ARG INSTALL_TTS=1
 
 # Keep Python quiet, prevent interactive prompts, and explicitly expose the Conda python executable to the system PATH
+# --- THE MAGIC APU FIX: HSA_ENABLE_SDMA=0 prevents the 780M from hard-crashing the display manager during memory transfers! ---
+# We also add PYTORCH_HIP_ALLOC_CONF to prevent memory fragmentation in the APU's shared RAM.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TTS_ENABLED=${INSTALL_TTS} \
     DEBIAN_FRONTEND=noninteractive \
-    PATH="/opt/conda/envs/py_3.10/bin:${PATH}"
+    PATH="/opt/conda/envs/py_3.10/bin:${PATH}" \
+    HSA_ENABLE_SDMA=0 \
+    PYTORCH_HIP_ALLOC_CONF=garbage_collection_threshold:0.8,max_split_size_mb:512
 
 # Install runtime system dependencies (ffmpeg), build tools (cmake), and audio/video headers
 # required to compile torchaudio directly from C++ source code.

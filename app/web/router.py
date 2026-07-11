@@ -760,7 +760,7 @@ async def update_ai_settings(
         whisper_compute_type = "float32"
 
     # Validate chunking parameters
-    if chunk_num_chunks < 2 or chunk_num_chunks > 50:
+    if chunk_num_chunks < 1 or chunk_num_chunks > 50:
         chunk_num_chunks = 10
     if chunk_overlap_percent < 0 or chunk_overlap_percent > 75:
         chunk_overlap_percent = 25
@@ -1869,25 +1869,28 @@ async def add_subscription(
 
         print(f"Created new sub: {new_sub}")
 
-        # Apply other global defaults immediately
-        sub_repo.update_settings(
-            new_sub.id,
-            remove_ads=bool(app_settings['default_remove_ads']),
-            remove_promos=bool(app_settings['default_remove_promos']),
-            remove_intros=bool(app_settings['default_remove_intros']),
-            remove_outros=bool(app_settings['default_remove_outros']),
-            custom_instructions=app_settings['default_custom_instructions'],
-            append_summary=bool(app_settings['default_ai_audio_summary']), # Mapped correctly? Yes
-            append_title_intro=bool(app_settings['default_append_title_intro']),
-            ai_rewrite_description=bool(app_settings['default_ai_rewrite_description']),
-            ai_audio_summary=bool(app_settings['default_ai_audio_summary']),
-            feed_url=feed_url,
-            retention_days=app_settings['default_retention_days'] or 30,
-            manual_retention_days=app_settings['default_manual_retention_days'] or 14,
-            retention_limit=retention_limit,
-            download_order=app_settings.get('default_download_order', 'newest')
-        )
-
+        try:
+            # Apply other global defaults immediately
+            sub_repo.update_settings(
+                new_sub.id,
+                remove_ads=bool(app_settings['default_remove_ads']),
+                remove_promos=bool(app_settings['default_remove_promos']),
+                remove_intros=bool(app_settings['default_remove_intros']),
+                remove_outros=bool(app_settings['default_remove_outros']),
+                custom_instructions=app_settings['default_custom_instructions'],
+                append_summary=bool(app_settings['default_ai_audio_summary']), # Mapped correctly? Yes
+                append_title_intro=bool(app_settings['default_append_title_intro']),
+                ai_rewrite_description=bool(app_settings['default_ai_rewrite_description']),
+                ai_audio_summary=bool(app_settings['default_ai_audio_summary']),
+                feed_url=feed_url,
+                retention_days=app_settings['default_retention_days'] or 30,
+                manual_retention_days=app_settings['default_manual_retention_days'] or 14,
+                retention_limit=retention_limit,
+                download_order=app_settings.get('default_download_order', 'newest')
+            )
+        except Exception as e:
+            logger.error(f"Failed to apply global defaults to new subscription: {e}")
+            logging.exception("Failed to apply global defaults to new subscription")
         
         # All heavy lifting happens in background
         print(f"About to setup subscription async: new_sub.id: {new_sub.id}")

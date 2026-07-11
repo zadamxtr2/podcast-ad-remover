@@ -1,16 +1,13 @@
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from contextlib import asynccontextmanager
-import asyncio
 import logging
+import os
+from contextlib import asynccontextmanager
+# Configure logging
+from logging.handlers import RotatingFileHandler
 
 from app.core.config import is_default_session_secret, settings
 from app.infra.database import init_db
-from app.core.processor import Processor
-
-# Configure logging
-from logging.handlers import RotatingFileHandler
-import os
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 log_file = os.path.join(settings.DATA_DIR, "app.log")
@@ -140,7 +137,6 @@ from app.web.middleware import feed_auth_middleware
 from app.web.auth import auth_middleware
 from app.web.security_headers import SecurityHeadersMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-import secrets
 
 app = FastAPI(
     title="Podcast Ad Remover",

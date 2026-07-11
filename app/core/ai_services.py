@@ -7,6 +7,7 @@ import sys
 import gc
 import importlib.util
 import wave
+import whisperx
 from typing import List, Dict
 from app.core.config import settings
 import httpx
@@ -64,10 +65,9 @@ class Transcriber:
             "whisper_compute_type": "float32",
             "whisper_cpu_threads": 0,
             "ffmpeg_threads": 0,
-            "enable_diarization": 0,
-            "hf_token": None,
-            "min_speakers": 1,
-            "max_speakers": 10,
+            "enable_diarization": 1,
+            "min_speakers": 2,
+            "max_speakers": 20,
         }
         try:
             from app.infra.database import get_db_connection
@@ -82,10 +82,10 @@ class Transcriber:
                     runtime["whisper_compute_type"] = row["whisper_compute_type"] or "float32"
                     runtime["whisper_cpu_threads"] = int(row["whisper_cpu_threads"] or 0)
                     runtime["ffmpeg_threads"] = int(row["ffmpeg_threads"] or 0)
-                    runtime["enable_diarization"] = int(row["enable_diarization"] or 0)
+                    runtime["enable_diarization"] = int(row["enable_diarization"] or 1)
                     runtime["hf_token"] = row["hf_token"]
-                    runtime["min_speakers"] = int(row["min_speakers"] or 1)
-                    runtime["max_speakers"] = int(row["max_speakers"] or 10)
+                    runtime["min_speakers"] = int(row["min_speakers"] or 2)
+                    runtime["max_speakers"] = int(row["max_speakers"] or 20)
         except Exception as e:
             logger.warning(f"Failed to fetch runtime settings, using defaults: {e}")
         return runtime
@@ -112,8 +112,7 @@ class Transcriber:
             # Initialize diarization pipeline
             diarize_model = DiarizationPipeline(
                 token=hf_token,
-                device="cpu",
-                cache_dir=settings.MODELS_DIR
+                device="cpu"
             )
             
             # Perform diarization
@@ -122,11 +121,13 @@ class Transcriber:
                 min_speakers=min_speakers if min_speakers > 0 else None,
                 max_speakers=max_speakers if max_speakers > 0 else None
             )
-            
+
+            logger.debug(f"Diarization complete. diarize_segments: {diarize_segments}")
+
             # Assign speakers to words
             result = whisperx.assign_word_speakers(diarize_segments, result)
             
-            logger.info("Diarization complete. Speaker labels assigned to segments.")
+            logger.debug(f"Diarization complete. Speaker labels assigned to segments. result: {result}")
             
             # Clean up diarization model
             del diarize_model
@@ -135,6 +136,7 @@ class Transcriber:
             return result
         except Exception as e:
             logger.error(f"Diarization failed: {e}. Continuing without speaker labels.")
+            logging.exception("Exception stack trace:\n")
             return result
 
     def load_model(self, runtime_settings: Dict | None = None):
@@ -171,22 +173,24 @@ class Transcriber:
 
     def transcribe(self, audio_path: str, progress_callback=None) -> Dict:
         from app.core.audio import AudioProcessor
+        from app.core.config import settings
 
         runtime_settings = self._load_runtime_settings()
         self.load_model(runtime_settings)
         ffmpeg_threads = int(runtime_settings.get("ffmpeg_threads") or 0)
-        enable_diarization = int(runtime_settings.get("enable_diarization") or 0)
-        hf_token = runtime_settings.get("hf_token")
-        min_speakers = int(runtime_settings.get("min_speakers") or 1)
-        max_speakers = int(runtime_settings.get("max_speakers") or 10)
+        enable_diarization = int(runtime_settings.get("enable_diarization") or 1)
+        hf_token = settings.HF_TOKEN
+        logger.debug(f"HF Token: {hf_token}")
+        min_speakers = int(runtime_settings.get("min_speakers") or 2)
+        max_speakers = int(runtime_settings.get("max_speakers") or 20)
 
         # Get total duration for progress calculation
         audio_duration = AudioProcessor.get_duration(audio_path)
         logger.info(f"Transcribing {audio_path} (Duration: {audio_duration:.2f}s)...")
 
         # Determine if we should use chunked transcription
-        # Threshold: 20 minutes (1200 seconds)
-        chunk_threshold = 1200.0
+        # Threshold: 200 minutes (12000 seconds)
+        chunk_threshold = 12000.0
         if audio_duration > chunk_threshold:
             logger.info("File exceeds duration threshold. Using chunked transcription.")
             return self._transcribe_chunked(audio_path, audio_duration, progress_callback, ffmpeg_threads=ffmpeg_threads,
@@ -229,6 +233,8 @@ class Transcriber:
                 # Perform diarization
                 result = self._perform_diarization(audio, result, hf_token, min_speakers, max_speakers)
 
+                logger.debug(f"Diarization result: {result}")
+
             segments_result = []
             
             # Convert WhisperX segments to our format
@@ -260,6 +266,7 @@ class Transcriber:
             }
 
             logger.info(f"Transcription complete. Found {len(segments_result)} segments.")
+            logger.debug(f"Final result: {final_result}")
 
             return final_result
         finally:
@@ -273,7 +280,7 @@ class Transcriber:
 
     def _transcribe_chunked(self, audio_path: str, total_duration: float, progress_callback=None, 
                            ffmpeg_threads: int = 0, enable_diarization: int = 0, 
-                           hf_token: str = None, min_speakers: int = 1, max_speakers: int = 10) -> Dict:
+                           hf_token: str = None, min_speakers: int = 2, max_speakers: int = 20) -> Dict:
         from app.core.audio import AudioProcessor
         import whisperx
 
@@ -380,7 +387,9 @@ class Transcriber:
                 
                 # Perform diarization
                 diarized_result = self._perform_diarization(full_audio, aligned_result, hf_token, min_speakers, max_speakers)
-                
+
+                logger.debug(f"Diarization complete. diarized_result: {diarized_result}")
+
                 # Update all_segments with speaker information
                 for i, segment in enumerate(diarized_result["segments"]):
                     if i < len(all_segments):
@@ -398,6 +407,7 @@ class Transcriber:
             }
 
             logger.info(f"Chunked transcription complete. Found {len(all_segments)} total segments.")
+            logger.debug(f"Final result: {result}")
             return result
 
         finally:
@@ -460,7 +470,7 @@ class OpenAIProvider(LLMProvider):
         key = self.api_keys[self.current_key_idx]
         masked = key[:4] + "..." + key[-4:] if len(key) > 8 else "***"
         logger.info(f"{self.provider_name}: Initializing client with key #{self.current_key_idx + 1} ({masked})")
-        self.client = self.openai.OpenAI(api_key=key, base_url=self.base_url)
+        self.client = self.openai.OpenAI(api_key=key, base_url=self.base_url, timeout=3600)
 
     def _rotate_key(self) -> bool:
         if self.current_key_idx + 1 < len(self.api_keys):
@@ -765,6 +775,8 @@ class AdDetector:
         num_chunks = self.settings.get('chunk_num_chunks') or 10
         overlap_percent = (self.settings.get('chunk_overlap_percent') or 25) / 100.0  # Convert percent to decimal
 
+        logger.info(f"detecting ads, transcript: {transcript}")
+
         # Chunk the transcript using configured settings
         chunks = self._chunk_transcript(transcript, num_chunks=num_chunks, overlap_percent=overlap_percent)
         
@@ -779,19 +791,27 @@ class AdDetector:
         provider = self._get_provider()
         
         for i, chunk in enumerate(chunks):
-            logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+            logger.debug(f"Processing chunk {i+1}/{len(chunks)} for Ad detection")
             
             # Prepare transcript text for this chunk
             text_data = ""
-            for seg in chunk['segments']:
-                text_data += f"[{seg['start']:.2f}-{seg['end']:.2f}] {seg['text']}\n"
+            try:
+                for seg in chunk['segments']:
+                    logger.debug(f"Processing segment: {seg}")
+                    text_data += f"[{seg['start']:.2f}-{seg['end']:.2f}][{seg['speaker'] if 'speaker' in seg else 'UNKNOWN'}] {seg['text']}\n"
+            except Exception as e:
+                logger.error(f"Failed to process chunk {i+1} for Ad detection: {e}")
+                logging.exception("Failed to process chunk for Ad detection")
+                continue
 
             # Build Prompt
             prompt = self._build_ad_prompt(options, text_data, whitelist_mode=whitelist_mode)
 
             # Execute
             try:
+                logger.info(f"Sending prompt: {prompt}")
                 response_text = provider.generate(prompt)
+                logger.info(f"Response: {response_text}")
                 raw_segments = self._parse_ad_response(response_text)
                 chunk_results.append(raw_segments)
                 logger.info(f"Chunk {i+1} detected {len(raw_segments)} segments")

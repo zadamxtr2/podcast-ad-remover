@@ -798,7 +798,7 @@ class AdDetector:
             try:
                 for seg in chunk['segments']:
                     logger.debug(f"Processing segment: {seg}")
-                    text_data += f"[{seg['start']:.2f}-{seg['end']:.2f}][{seg['speaker'] if 'speaker' in seg else 'UNKNOWN'}] {seg['text']}\n"
+                    text_data += f"[{seg['start']:.2f}-{seg['end']:.2f}] [{seg['speaker'] if 'speaker' in seg else 'UNKNOWN'}] {seg['text']}\n"
             except Exception as e:
                 logger.error(f"Failed to process chunk {i+1} for Ad detection: {e}")
                 logging.exception("Failed to process chunk for Ad detection")

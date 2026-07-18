@@ -717,6 +717,7 @@ async def update_ai_settings(
     request: Request,
     whisper_model: str = Form("base"),
     whisper_compute_type: str = Form("float32"),
+    transcription_method: str = Form("whisperx"),
     min_speakers: int = Form(1),
     max_speakers: int = Form(20),
     ai_model_cascade: str = Form(...),
@@ -797,6 +798,7 @@ async def update_ai_settings(
             UPDATE app_settings
             SET whisper_model = ?,
                 whisper_compute_type = ?,
+                transcription_method = ?,
                 min_speakers = ?,
                 max_speakers = ?,
                 ai_model_cascade = ?,
@@ -819,7 +821,7 @@ async def update_ai_settings(
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
         """, (
-            whisper_model, whisper_compute_type, min_speakers, max_speakers,
+            whisper_model, whisper_compute_type, transcription_method, min_speakers, max_speakers,
             ai_model_cascade, piper_model,
             tts_provider, gemini_tts_voice, gemini_tts_model_cascade,
             active_ai_provider,
@@ -2229,6 +2231,7 @@ async def update_settings(
     auto_download_next: bool = Form(False),
     min_speakers: int = Form(None),
     max_speakers: int = Form(None),
+    transcription_method: str = Form(None),
     user = Depends(require_auth),
 ):
     sub = sub_repo.get_by_id(id)
@@ -2257,6 +2260,10 @@ async def update_settings(
         min_speakers = None
         max_speakers = None
 
+    # Validate transcription_method
+    if transcription_method and transcription_method not in ("whisperx", "faster-whisper"):
+        transcription_method = None
+
     sub_repo.update_settings(
         id,
         remove_ads,
@@ -2275,7 +2282,8 @@ async def update_settings(
         download_order,
         auto_download_next,
         min_speakers,
-        max_speakers
+        max_speakers,
+        transcription_method
     )
     
     # Trigger processing if any ads/promos settings were changed

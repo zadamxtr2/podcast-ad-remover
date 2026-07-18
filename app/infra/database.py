@@ -197,6 +197,13 @@ FORMAL_MIGRATIONS = [
             "ALTER TABLE app_settings ADD COLUMN default_max_speakers INTEGER DEFAULT 20",
         ],
     ),
+    (
+        "20260718_0011_transcription_method",
+        [
+            "ALTER TABLE app_settings ADD COLUMN transcription_method TEXT DEFAULT 'whisperx'",
+            "ALTER TABLE subscriptions ADD COLUMN transcription_method TEXT DEFAULT NULL",
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000

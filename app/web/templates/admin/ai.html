@@ -75,7 +75,18 @@
         {% if ai_section == 'ai_transcription' %}
         <div>
             <h4 class="text-lg font-medium border-b border-white/[0.08] pb-2 mb-4">Transcription</h4>
-            <label class="block text-sm font-medium text-text-secondary mb-2">Whisper Model</label>
+            <label class="block text-sm font-medium text-text-secondary mb-2">Transcription Method</label>
+            <select name="transcription_method" class="select">
+                <option value="whisperx" {% if (settings.transcription_method or 'whisperx')=='whisperx' %}selected{% endif %}>
+                    WhisperX with Diarization (Default)
+                </option>
+                <option value="faster-whisper" {% if settings.transcription_method=='faster-whisper' %}selected{% endif %}>
+                    Faster-Whisper (No Diarization)
+                </option>
+            </select>
+            <p class="text-xs text-text-muted mt-2">WhisperX provides speaker diarization (identifying different speakers) but requires more resources. Faster-Whisper is faster and lighter but does not support speaker identification.</p>
+            
+            <label class="block text-sm font-medium text-text-secondary mb-2 mt-4">Whisper Model</label>
             <select name="whisper_model" class="select">
                 {% for model in ['tiny', 'tiny.en', 'base', 'base.en', 'small', 'small.en', 'medium', 'medium.en', 'large', 'large-v3-turbo'] %}
                 <option value="{{ model }}" {% if settings.whisper_model==model %}selected{% endif %}>

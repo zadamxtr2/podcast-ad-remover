@@ -318,7 +318,17 @@
                 </div>
 
                 <div class="mt-6 pt-4 border-t border-white/[0.08]">
-                    <h4 class="font-semibold mb-3">Diarization Settings</h4>
+                    <h4 class="font-semibold mb-3">Transcription Settings</h4>
+                    <p class="text-xs text-text-muted mb-3">Override global transcription settings for this podcast. Leave blank to use global defaults.</p>
+                    <div class="mb-4">
+                        <label class="block text-sm text-text-secondary mb-2">Transcription Method</label>
+                        <select name="transcription_method" class="select">
+                            <option value="" {% if not subscription.transcription_method %}selected{% endif %}>Global (Default)</option>
+                            <option value="whisperx" {% if subscription.transcription_method=='whisperx' %}selected{% endif %}>WhisperX with Diarization</option>
+                            <option value="faster-whisper" {% if subscription.transcription_method=='faster-whisper' %}selected{% endif %}>Faster-Whisper (No Diarization)</option>
+                        </select>
+                    </div>
+                    <h4 class="font-semibold mb-3 mt-4">Diarization Settings</h4>
                     <p class="text-xs text-text-muted mb-3">Override global transcription speaker detection for this podcast. Leave blank to use global defaults.</p>
                     <div class="grid grid-cols-2 gap-4">
                         <div>

@@ -672,13 +672,15 @@ class Processor:
                     self.ep_repo.update_progress(ep.id, step, percent)
 
                 try:
-                    # Get subscription-level speaker settings if available
+                    # Get subscription-level transcription settings if available
+                    sub_transcription_method = getattr(sub, 'transcription_method', None)
                     sub_min_speakers = getattr(sub, 'min_speakers', None)
                     sub_max_speakers = getattr(sub, 'max_speakers', None)
                     
                     transcript = await asyncio.to_thread(
                         self.transcriber.transcribe, input_path, progress_callback=transcribe_progress,
-                        min_speakers=sub_min_speakers, max_speakers=sub_max_speakers
+                        min_speakers=sub_min_speakers, max_speakers=sub_max_speakers,
+                        transcription_method=sub_transcription_method
                     )
                 except Exception as e:
                     # Catch cancellation exception from thread

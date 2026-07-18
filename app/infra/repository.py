@@ -541,7 +541,8 @@ class EpisodeRepository:
                     ad_report_path = NULL,
                     report_path = NULL,
                     progress = 0,
-                    processing_step = NULL
+                    processing_step = NULL,
+                    is_manual_download = is_manual_download
                 WHERE id = ?
             """, (id,))
             JobRepository().cancel_active_for_episode(id, conn=conn)

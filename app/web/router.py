@@ -1132,6 +1132,7 @@ async def _handle_auto_download_next(subscription_id: int, downloaded_episode_id
             WHERE subscription_id = ?
               AND id != ?
               AND status NOT IN ('completed', 'processing', 'pending')
+              AND is_manual_download = 0
             ORDER BY {order_clause}
             LIMIT 1
         """, (subscription_id, downloaded_episode_id)).fetchone()

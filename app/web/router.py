@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request, Form, Depends, BackgroundTasks, HTTPExce
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.infra.repository import ApiTokenRepository, SubscriptionRepository, EpisodeRepository, FeedTokenRepository
-from app.core.feed import FeedManager
 from app.core.models import SubscriptionCreate
 from app.core.system_status import get_operation_status
 from app.core.url_utils import validate_http_url
@@ -718,6 +717,8 @@ async def update_ai_settings(
     request: Request,
     whisper_model: str = Form("base"),
     whisper_compute_type: str = Form("float32"),
+    min_speakers: int = Form(1),
+    max_speakers: int = Form(20),
     ai_model_cascade: str = Form(...),
     piper_model: str = Form("en_GB-cori-high.onnx"),
     tts_provider: str = Form("piper"),
@@ -765,6 +766,15 @@ async def update_ai_settings(
     if chunk_overlap_percent < 0 or chunk_overlap_percent > 75:
         chunk_overlap_percent = 25
 
+    # Validate speaker parameters
+    if min_speakers < 1 or min_speakers > 20:
+        min_speakers = 1
+    if max_speakers < 1 or max_speakers > 20:
+        max_speakers = 20
+    if min_speakers > max_speakers:
+        min_speakers = 1
+        max_speakers = 20
+
     # Handle checkbox: if not sent (None), it's unchecked (0). If sent, it's checked (1)
     if include_reason is None:
         include_reason = 0
@@ -787,6 +797,8 @@ async def update_ai_settings(
             UPDATE app_settings
             SET whisper_model = ?,
                 whisper_compute_type = ?,
+                min_speakers = ?,
+                max_speakers = ?,
                 ai_model_cascade = ?,
                 piper_model = ?,
                 tts_provider = ?,
@@ -807,7 +819,8 @@ async def update_ai_settings(
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
         """, (
-            whisper_model, whisper_compute_type, ai_model_cascade, piper_model,
+            whisper_model, whisper_compute_type, min_speakers, max_speakers,
+            ai_model_cascade, piper_model,
             tts_provider, gemini_tts_voice, gemini_tts_model_cascade,
             active_ai_provider,
             openai_api_key, openai_base_url, anthropic_api_key, openrouter_api_key, gemini_api_keys,
@@ -1083,10 +1096,87 @@ async def api_ignore_episode(episode_id: int, user = Depends(require_auth)):
     await proc.delete_episode(episode_id)
     return {"status": "ok"}
 
+
+async def _handle_auto_download_next(subscription_id: int, downloaded_episode_id: int, proc):
+    """Handle auto-download next: find next episode, queue it, and delete the downloaded episode."""
+    from app.infra.database import get_db_connection
+
+    logger.info(f"Auto-download next: triggered for subscription {subscription_id}, downloaded episode {downloaded_episode_id}")
+
+    with get_db_connection() as conn:
+        # Get subscription's download order
+        sub_row = conn.execute(
+            "SELECT download_order FROM subscriptions WHERE id = ?",
+            (subscription_id,)
+        ).fetchone()
+
+        if not sub_row:
+            logger.warning(f"Auto-download next: subscription {subscription_id} not found")
+            return
+
+        download_order = sub_row['download_order'] or 'newest'
+        logger.info(f"Auto-download next: subscription {subscription_id} has download_order={download_order}")
+
+        # Find the next available episode (not the one just downloaded, not already completed)
+        # Order depends on download_order setting
+        if download_order == 'newest':
+            order_clause = "pub_date DESC"
+        else:
+            order_clause = "pub_date ASC"
+
+        next_episode_row = conn.execute(f"""
+            SELECT id, title, status
+            FROM episodes
+            WHERE subscription_id = ?
+              AND id != ?
+              AND status NOT IN ('completed', 'processing', 'pending')
+            ORDER BY {order_clause}
+            LIMIT 1
+        """, (subscription_id, downloaded_episode_id)).fetchone()
+
+        if next_episode_row:
+            # Queue the next episode for download
+            next_episode_id = next_episode_row['id']
+            logger.info(f"Auto-download next: queuing episode {next_episode_id} ('{next_episode_row['title']}') for subscription {subscription_id}")
+
+            conn.execute("UPDATE episodes SET is_manual_download=1 WHERE id=?", (next_episode_id,))
+            conn.commit()
+
+            ep_repo.update_status(next_episode_id, "pending")
+        else:
+            logger.info(f"Auto-download next: no available episodes found for subscription {subscription_id}")
+
+        # Delete the downloaded episode
+        logger.info(f"Auto-download next: deleting downloaded episode {downloaded_episode_id}")
+        await proc.delete_episode(downloaded_episode_id)
+
+
 @router.post("/episodes/{episode_id}/download")
 async def manual_download_episode(episode_id: int, request: Request, user = Depends(require_auth)):
-    # Update DB to pending
     from app.infra.database import get_db_connection
+
+    # Get episode and subscription info
+    with get_db_connection() as conn:
+        episode_row = conn.execute(
+            "SELECT e.*, s.auto_download_next as sub_auto_download_next FROM episodes e JOIN subscriptions s ON e.subscription_id = s.id WHERE e.id = ?",
+            (episode_id,)
+        ).fetchone()
+
+        if not episode_row:
+            raise HTTPException(status_code=404, detail="Episode not found")
+
+        subscription_id = episode_row['subscription_id']
+        sub_auto_download_next = bool(episode_row['sub_auto_download_next'])
+
+        # Check global setting
+        global_settings_row = conn.execute("SELECT default_auto_download_next FROM app_settings WHERE id = 1").fetchone()
+        global_auto_download_next = bool(global_settings_row['default_auto_download_next']) if global_settings_row else False
+
+        # Auto-download is enabled if either global or per-subscription setting is enabled
+        auto_download_enabled = global_auto_download_next or sub_auto_download_next
+        logger.info(f"Auto-download next: global={global_auto_download_next}, subscription={sub_auto_download_next}, enabled={auto_download_enabled}")
+
+    # Update DB to pending
     with get_db_connection() as conn:
         conn.execute("UPDATE episodes SET is_manual_download=1 WHERE id=?", (episode_id,))
         conn.commit()
@@ -1096,6 +1186,10 @@ async def manual_download_episode(episode_id: int, request: Request, user = Depe
     from app.core.processor import Processor
     proc = Processor()
     await proc.process_queue()
+
+    # If auto-download next is enabled, trigger the logic
+    if auto_download_enabled:
+        await _handle_auto_download_next(subscription_id, episode_id, proc)
 
     return RedirectResponse(url=request.headers.get("referer") or "/", status_code=303)
 
@@ -1792,6 +1886,9 @@ async def update_global_subscription_settings(
     default_custom_instructions: str = Form(None),
     default_download_order: str = Form("newest"),
     whitelist_mode: bool = Form(False),
+    default_auto_download_next: bool = Form(False),
+    default_min_speakers: int = Form(1),
+    default_max_speakers: int = Form(20),
     admin_user = Depends(require_admin)
 ):
     with get_db_connection() as conn:
@@ -1809,13 +1906,17 @@ async def update_global_subscription_settings(
                 default_manual_retention_days = ?,
                 default_custom_instructions = ?,
                 default_download_order = ?,
-                whitelist_mode = ?
+                whitelist_mode = ?,
+                default_auto_download_next = ?,
+                default_min_speakers = ?,
+                default_max_speakers = ?
             WHERE id = 1
         """, (
             default_remove_ads, default_remove_promos, default_remove_intros, default_remove_outros,
             default_ai_rewrite_description, default_ai_audio_summary, default_append_title_intro,
             default_retention_limit, default_retention_days, default_manual_retention_days,
-            default_custom_instructions, default_download_order, 1 if whitelist_mode else 0
+            default_custom_instructions, default_download_order, 1 if whitelist_mode else 0,
+            1 if default_auto_download_next else 0, default_min_speakers, default_max_speakers
         ))
         conn.commit()
         
@@ -1854,6 +1955,10 @@ async def add_subscription(
         # The UI defaults this dropdown to the global default setting already.
         retention_limit = initial_count
 
+        # Get global defaults for speaker settings
+        default_min_speakers = app_settings.get("default_min_speakers", 1)
+        default_max_speakers = app_settings.get("default_max_speakers", 20)
+
         print(f"About to create Subscription")
 
         sub_create = SubscriptionCreate(feed_url=feed_url)
@@ -1865,6 +1970,8 @@ async def add_subscription(
             "Fetching feed information...",
             retention_limit=retention_limit,
             owner_user_id=_real_user_id(user),
+            min_speakers=default_min_speakers,
+            max_speakers=default_max_speakers,
         )
 
         print(f"Created new sub: {new_sub}")
@@ -2119,6 +2226,9 @@ async def update_settings(
     manual_retention_days: int = Form(14),
     retention_limit: int = Form(1),
     download_order: str = Form("newest"),
+    auto_download_next: bool = Form(False),
+    min_speakers: int = Form(None),
+    max_speakers: int = Form(None),
     user = Depends(require_auth),
 ):
     sub = sub_repo.get_by_id(id)
@@ -2126,6 +2236,26 @@ async def update_settings(
         raise HTTPException(status_code=404, detail="Subscription not found")
     if not _can_manage_subscription(user, sub):
         raise HTTPException(status_code=403, detail="Only admins and the podcast owner can change podcast settings")
+
+    # Validate speaker parameters
+    if min_speakers is not None and min_speakers != "":
+        min_speakers = int(min_speakers)
+        if min_speakers < 1 or min_speakers > 20:
+            min_speakers = None
+    else:
+        min_speakers = None
+
+    if max_speakers is not None and max_speakers != "":
+        max_speakers = int(max_speakers)
+        if max_speakers < 1 or max_speakers > 20:
+            max_speakers = None
+    else:
+        max_speakers = None
+
+    # Ensure min <= max if both are set
+    if min_speakers is not None and max_speakers is not None and min_speakers > max_speakers:
+        min_speakers = None
+        max_speakers = None
 
     sub_repo.update_settings(
         id,
@@ -2142,7 +2272,10 @@ async def update_settings(
         retention_days,
         manual_retention_days,
         retention_limit,
-        download_order
+        download_order,
+        auto_download_next,
+        min_speakers,
+        max_speakers
     )
     
     # Trigger processing if any ads/promos settings were changed

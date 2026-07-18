@@ -269,6 +269,20 @@
                         </select>
                     </div>
                 </div>
+
+                <div class="pt-4 border-t border-white/[0.08]">
+                    <div class="flex items-start gap-3">
+                        <input type="checkbox" name="auto_download_next" id="auto_download_next"
+                            class="mt-1 h-4 w-4 text-primary-500 rounded bg-surface-base border-white/20 focus:ring-primary-500"
+                            {% if subscription.auto_download_next %}checked{% endif %}>
+                        <div>
+                            <label for="auto_download_next" class="text-sm font-medium text-text-secondary cursor-pointer">Auto-Download Next</label>
+                            <p class="text-xs text-text-muted mt-1">
+                                When enabled, automatically download the next available episode when a user downloads a processed episode, and delete the downloaded episode after it's been downloaded.
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="space-y-4">
@@ -301,6 +315,21 @@
                 <div class="mt-4">
                     <label class="block text-sm font-medium text-text-secondary mb-2">RSS Feed URL</label>
                     <textarea name="feed_url" rows="1" class="input font-mono text-sm">{{ subscription.feed_url }}</textarea>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-white/[0.08]">
+                    <h4 class="font-semibold mb-3">Diarization Settings</h4>
+                    <p class="text-xs text-text-muted mb-3">Override global transcription speaker detection for this podcast. Leave blank to use global defaults.</p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-text-secondary mb-2">Minimum Speakers</label>
+                            <input type="number" name="min_speakers" value="{{ subscription.min_speakers or '' }}" min="1" max="20" placeholder="Global (1)" class="input">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-text-secondary mb-2">Maximum Speakers</label>
+                            <input type="number" name="max_speakers" value="{{ subscription.max_speakers or '' }}" min="1" max="20" placeholder="Global (20)" class="input">
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

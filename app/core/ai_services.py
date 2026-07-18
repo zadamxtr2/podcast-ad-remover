@@ -66,7 +66,7 @@ class Transcriber:
             "whisper_cpu_threads": 0,
             "ffmpeg_threads": 0,
             "enable_diarization": 1,
-            "min_speakers": 2,
+            "min_speakers": 1,
             "max_speakers": 20,
         }
         try:
@@ -84,7 +84,7 @@ class Transcriber:
                     runtime["ffmpeg_threads"] = int(row["ffmpeg_threads"] or 0)
                     runtime["enable_diarization"] = int(row["enable_diarization"] or 1)
                     runtime["hf_token"] = row["hf_token"]
-                    runtime["min_speakers"] = int(row["min_speakers"] or 2)
+                    runtime["min_speakers"] = int(row["min_speakers"] or 1)
                     runtime["max_speakers"] = int(row["max_speakers"] or 20)
         except Exception as e:
             logger.warning(f"Failed to fetch runtime settings, using defaults: {e}")
@@ -171,7 +171,7 @@ class Transcriber:
             load_duration = time.time() - start_load
             logger.info(f"Model loaded in {load_duration:.2f}s")
 
-    def transcribe(self, audio_path: str, progress_callback=None) -> Dict:
+    def transcribe(self, audio_path: str, progress_callback=None, min_speakers: int = None, max_speakers: int = None) -> Dict:
         from app.core.audio import AudioProcessor
         from app.core.config import settings
 
@@ -181,8 +181,12 @@ class Transcriber:
         enable_diarization = int(runtime_settings.get("enable_diarization") or 1)
         hf_token = settings.HF_TOKEN
         logger.debug(f"HF Token: {hf_token}")
-        min_speakers = int(runtime_settings.get("min_speakers") or 2)
-        max_speakers = int(runtime_settings.get("max_speakers") or 20)
+        
+        # Use subscription-level settings if provided, otherwise fall back to global settings
+        if min_speakers is None:
+            min_speakers = int(runtime_settings.get("min_speakers") or 1)
+        if max_speakers is None:
+            max_speakers = int(runtime_settings.get("max_speakers") or 20)
 
         # Get total duration for progress calculation
         audio_duration = AudioProcessor.get_duration(audio_path)

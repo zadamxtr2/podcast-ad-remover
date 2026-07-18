@@ -109,6 +109,21 @@
                     </select>
                 </div>
             </div>
+
+            <div class="pt-4 border-t border-white/[0.08]">
+                <h4 class="font-semibold mb-3">Auto-Download Next</h4>
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" name="default_auto_download_next" id="default_auto_download_next"
+                        class="mt-1 h-4 w-4 text-primary-500 rounded bg-surface-base border-white/20 focus:ring-primary-500"
+                        {% if settings.default_auto_download_next %}checked{% endif %}>
+                    <div>
+                        <label for="default_auto_download_next" class="text-sm font-medium text-text-secondary cursor-pointer">Enable Auto-Download Next</label>
+                        <p class="text-xs text-text-muted mt-1">
+                            When enabled, automatically download the next available episode when a user downloads a processed episode, and delete the downloaded episode after it's been downloaded.
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Features -->
@@ -140,6 +155,23 @@
                     Instructions</label>
                 <textarea name="default_custom_instructions" rows="4" class="input font-mono text-sm"
                     placeholder="E.g., 'Remove segments discussing XYZ', 'Keep promos for host's other shows'">{{ settings.default_custom_instructions or '' }}</textarea>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-white/[0.08]">
+                <h4 class="font-semibold mb-3">Default Diarization Settings</h4>
+                <p class="text-xs text-text-muted mb-3">These defaults will be used for new subscriptions. Individual podcasts can override these settings.</p>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-text-secondary mb-2">Default Minimum Speakers</label>
+                        <input type="number" name="default_min_speakers" value="{{ settings.default_min_speakers or 1 }}" min="1" max="20" class="input">
+                        <p class="text-xs text-text-muted mt-1">Default: 1</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-text-secondary mb-2">Default Maximum Speakers</label>
+                        <input type="number" name="default_max_speakers" value="{{ settings.default_max_speakers or 20 }}" min="1" max="20" class="input">
+                        <p class="text-xs text-text-muted mt-1">Default: 20</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

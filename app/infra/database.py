@@ -177,6 +177,26 @@ FORMAL_MIGRATIONS = [
             """,
         ],
     ),
+    (
+        "20260717_0008_speaker_defaults",
+        [
+            "UPDATE app_settings SET max_speakers = 20 WHERE max_speakers = 10",
+        ],
+    ),
+    (
+        "20260717_0009_subscription_speakers",
+        [
+            "ALTER TABLE subscriptions ADD COLUMN min_speakers INTEGER DEFAULT NULL",
+            "ALTER TABLE subscriptions ADD COLUMN max_speakers INTEGER DEFAULT NULL",
+        ],
+    ),
+    (
+        "20260717_0010_global_subscription_speakers",
+        [
+            "ALTER TABLE app_settings ADD COLUMN default_min_speakers INTEGER DEFAULT 1",
+            "ALTER TABLE app_settings ADD COLUMN default_max_speakers INTEGER DEFAULT 20",
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000
@@ -499,7 +519,11 @@ Transcript Context: {transcript_context}""",))
         "ALTER TABLE app_settings ADD COLUMN enable_diarization INTEGER DEFAULT 0",
         "ALTER TABLE app_settings ADD COLUMN hf_token TEXT",
         "ALTER TABLE app_settings ADD COLUMN min_speakers INTEGER DEFAULT 1",
-        "ALTER TABLE app_settings ADD COLUMN max_speakers INTEGER DEFAULT 10"
+        "ALTER TABLE app_settings ADD COLUMN max_speakers INTEGER DEFAULT 10",
+
+        # Auto-download next feature
+        "ALTER TABLE app_settings ADD COLUMN default_auto_download_next INTEGER DEFAULT 0",
+        "ALTER TABLE subscriptions ADD COLUMN auto_download_next INTEGER DEFAULT 0"
     ]
     
     for sql in migrations:

@@ -49,6 +49,8 @@
     {% if ai_section != 'ai_transcription' %}
     <input type="hidden" name="whisper_model" value="{{ settings.whisper_model or 'base' }}">
     <input type="hidden" name="whisper_compute_type" value="{{ settings.whisper_compute_type or 'float32' }}">
+    <input type="hidden" name="min_speakers" value="{{ settings.min_speakers or 1 }}">
+    <input type="hidden" name="max_speakers" value="{{ settings.max_speakers or 20 }}">
     {% endif %}
     {% if ai_section != 'ai_voice' %}
     <input type="hidden" name="piper_model" value="{{ settings.piper_model or 'en_GB-cori-high.onnx' }}">
@@ -90,6 +92,19 @@
                 {% endfor %}
             </select>
             <p class="text-xs text-text-muted mt-2">float32 provides maximum compatibility and stability on CPU (especially ARM64). Other types may offer better performance on specific hardware.</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-2">Minimum Speakers</label>
+                    <input type="number" name="min_speakers" value="{{ settings.min_speakers or 1 }}" min="1" max="20" class="input">
+                    <p class="text-xs text-text-muted mt-1">Minimum number of speakers for diarization (Default: 1).</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-2">Maximum Speakers</label>
+                    <input type="number" name="max_speakers" value="{{ settings.max_speakers or 20 }}" min="1" max="20" class="input">
+                    <p class="text-xs text-text-muted mt-1">Maximum number of speakers for diarization (Default: 20).</p>
+                </div>
+            </div>
         </div>
         {% endif %}
 

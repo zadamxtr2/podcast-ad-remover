@@ -42,6 +42,13 @@ class Subscription(SubscriptionBase):
     # Download order
     download_order: Optional[str] = "newest"
 
+    # Auto-download next feature
+    auto_download_next: bool = False
+
+    # Diarization settings (NULL means use global defaults)
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+
 class EpisodeBase(BaseModel):
     guid: str
     title: str

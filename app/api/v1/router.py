@@ -325,10 +325,38 @@ async def check_subscription(
 @router.post("/episodes/{episode_id}/download", response_model=ActionResponse)
 async def download_episode(episode_id: int, principal: ApiPrincipal = Depends(require_scopes(["process"]))):
     _episode_manage_or_403(principal, episode_id)
+
+    # Get episode and subscription info
     with get_db_connection() as conn:
+        episode_row = conn.execute(
+            "SELECT e.*, s.auto_download_next as sub_auto_download_next FROM episodes e JOIN subscriptions s ON e.subscription_id = s.id WHERE e.id = ?",
+            (episode_id,)
+        ).fetchone()
+
+        if not episode_row:
+            raise HTTPException(status_code=404, detail="Episode not found")
+
+        subscription_id = episode_row['subscription_id']
+        sub_auto_download_next = bool(episode_row['sub_auto_download_next'])
+
+        # Check global setting
+        global_settings_row = conn.execute("SELECT default_auto_download_next FROM app_settings WHERE id = 1").fetchone()
+        global_auto_download_next = bool(global_settings_row['default_auto_download_next']) if global_settings_row else False
+
+        # Auto-download is enabled if either global or per-subscription setting is enabled
+        auto_download_enabled = global_auto_download_next or sub_auto_download_next
+
         conn.execute("UPDATE episodes SET is_manual_download = 1 WHERE id = ?", (episode_id,))
         conn.commit()
+
     ep_repo.update_status(episode_id, "pending")
+
+    # If auto-download next is enabled, trigger the logic
+    if auto_download_enabled:
+        from app.web.router import _handle_auto_download_next
+        proc = _processor()
+        await _handle_auto_download_next(subscription_id, episode_id, proc)
+
     return {"status": "download_queued", "id": episode_id}
 
 

@@ -24,7 +24,7 @@ This roadmap lists improvement candidates. It is not a release commitment.
 - Add optional token-attributed feed/audio access logging if admins need true per-user download analytics. Current stats show per-podcast user-library counts and aggregate plays.
 - Add dynamic per-user file serving so each user can keep podcast-specific preferences and receive a personalized episode file generated when their podcast client downloads it.
 - Add safer backup/export guidance before upgrades.
-- Keep the Library view in place when starting a podcast: update the relevant card asynchronously (or restore its scroll position) so users can start multiple podcasts while working down the list without being returned to the top.
+- Keep the Library view in place when starring a podcast into a user's personal list: update the relevant card asynchronously (or restore its scroll position) so users can star multiple podcasts while working down the list without being returned to the top.
 - Add optional podcast classifications that can drive differentiated defaults for retention, queue order, and feed handling: **finite** shows keep a complete start-to-finish catalogue; **current affairs** keep a recent rolling window; **narrative** shows default to chronological processing from the beginning; and **seasonal** shows support season-aware retention and, where useful, separate RSS feeds per season. Classifications must remain optional, preserve existing settings on upgrade, and allow per-podcast overrides.
 - Split large templates and move inline queue/episode JavaScript into static files.
 

@@ -56,6 +56,7 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
     assert "20260612_0005_notifications" in migrations
     assert "20260612_0006_tts_provider_settings" in migrations
     assert "20260617_0007_ai_api" in migrations
+    assert "20260722_0008_subscription_deletion" in migrations
 
     with get_db_connection() as conn:
         access_request_columns = {
@@ -66,8 +67,18 @@ def test_init_db_creates_formal_migration_tables(isolated_data_dir):
             row["name"]
             for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()
         }
+        subscription_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(subscriptions)").fetchall()
+        }
 
     assert "password_hash" in access_request_columns
+    assert {
+        "deletion_status",
+        "deletion_started_at",
+        "deletion_updated_at",
+        "deletion_error",
+    }.issubset(subscription_columns)
     assert {
         "notifications_enabled",
         "notification_urls",

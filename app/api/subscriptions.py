@@ -8,9 +8,6 @@ from app.core.search import PodcastSearcher
 from app.core.notifications import EVENT_NEW_PODCAST, send_notification_async
 from app.web.auth import require_auth
 from pydantic import BaseModel
-import shutil
-import os
-from app.core.config import settings
 
 
 router = APIRouter()
@@ -80,37 +77,11 @@ async def delete_subscription(id: int, user = Depends(require_auth)):
             removed = repo.remove_from_user_library(_real_user_id(user), id)
             return {"status": "removed_from_my_podcasts" if removed else "not_in_my_podcasts"}
 
-        # 1. Delete all episodes using Processor (cleans DB + all artifact files)
         proc = get_processor()
-        ep_repo = EpisodeRepository()
-        
-        # We need a way to get all episodes IDs first
-        # Assuming get_by_subscription returns models with IDs
-        episodes = ep_repo.get_by_subscription(sub.id)
-        for ep in episodes:
-            await proc.delete_episode(ep.id)
-            
-        # 2. Delete subscription-level folders/files
-        
-        # Audio directory (Subscription folder)
-        dir_path = os.path.join(settings.AUDIO_DIR, sub.slug)
-        if os.path.exists(dir_path):
-            try:
-                shutil.rmtree(dir_path)
-            except Exception as e:
-                print(f"Error deleting directory {dir_path}: {e}")
-        
-        # Feed file
-        feed_path = os.path.join(settings.FEEDS_DIR, f"{sub.slug}.xml")
-        if os.path.exists(feed_path):
-            try:
-                os.remove(feed_path)
-            except Exception as e:
-                 print(f"Error deleting feed file {feed_path}: {e}")
+        status = await proc.delete_subscription(id)
+        return {"status": status}
 
-        # 3. Delete Subscription from DB
-        repo.delete(id)
-    
+    # Repeated deletion is intentionally idempotent.
     return {"status": "deleted"}
 
 @router.delete("/episodes/{id}")

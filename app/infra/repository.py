@@ -48,21 +48,31 @@ class SubscriptionRepository:
                 return Subscription.model_validate(dict(row))
             return None
 
-    def get_all(self, user_id: int | None = None, only_user: bool = False) -> List[Subscription]:
+    def get_all(
+        self,
+        user_id: int | None = None,
+        only_user: bool = False,
+        include_deleting: bool = False,
+    ) -> List[Subscription]:
         with get_db_connection() as conn:
+            deletion_filter = "" if include_deleting else " AND s.deletion_status IS NULL"
             if only_user and user_id and user_id > 0:
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT s.*
                     FROM subscriptions s
                     JOIN user_subscriptions us ON us.subscription_id = s.id
                     WHERE us.user_id = ?
+                    {deletion_filter}
                     ORDER BY s.title COLLATE NOCASE
                     """,
                     (user_id,),
                 ).fetchall()
             else:
-                rows = conn.execute("SELECT * FROM subscriptions ORDER BY title COLLATE NOCASE").fetchall()
+                where_clause = "" if include_deleting else " WHERE deletion_status IS NULL"
+                rows = conn.execute(
+                    f"SELECT * FROM subscriptions{where_clause} ORDER BY title COLLATE NOCASE"
+                ).fetchall()
             return [Subscription.model_validate(dict(row)) for row in rows]
 
     def add_to_user_library(self, user_id: int | None, subscription_id: int) -> bool:
@@ -154,8 +164,173 @@ class SubscriptionRepository:
                 return Subscription.model_validate(dict(row))
             return None
 
+    def begin_deletion(self, id: int) -> Optional[dict]:
+        """Atomically deactivate a subscription and request cancellation of all work."""
+        with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM subscriptions WHERE id = ?", (id,)).fetchone()
+            if not row:
+                conn.commit()
+                return None
+
+            if row["deletion_status"] is None:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET is_active = 0,
+                        deletion_status = 'pending',
+                        deletion_started_at = CURRENT_TIMESTAMP,
+                        deletion_updated_at = CURRENT_TIMESTAMP,
+                        deletion_error = NULL
+                    WHERE id = ?
+                    """,
+                    (id,),
+                )
+                conn.execute(
+                    """
+                    UPDATE episodes
+                    SET status = 'ignored',
+                        local_filename = NULL,
+                        transcript_path = NULL,
+                        ad_report_path = NULL,
+                        report_path = NULL,
+                        progress = 0,
+                        processing_step = 'cancellation requested',
+                        next_retry_at = NULL
+                    WHERE subscription_id = ?
+                    """,
+                    (id,),
+                )
+                conn.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'cancelled',
+                        locked_at = NULL,
+                        locked_by = NULL,
+                        error = 'Cancelled because subscription deletion was requested',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE episode_id IN (
+                        SELECT id FROM episodes WHERE subscription_id = ?
+                    )
+                      AND type = 'process_episode'
+                      AND status IN ('queued', 'retry_scheduled', 'rate_limited')
+                    """,
+                    (id,),
+                )
+                conn.execute(
+                    """
+                    UPDATE jobs
+                    SET error = 'Cancellation requested because subscription is being deleted',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE episode_id IN (
+                        SELECT id FROM episodes WHERE subscription_id = ?
+                    )
+                      AND type = 'process_episode'
+                      AND status = 'running'
+                    """,
+                    (id,),
+                )
+
+            conn.commit()
+            current = conn.execute("SELECT * FROM subscriptions WHERE id = ?", (id,)).fetchone()
+            return dict(current) if current else None
+
+    def count_running_deletion_jobs(self, id: int) -> int:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM jobs j
+                JOIN episodes e ON e.id = j.episode_id
+                WHERE e.subscription_id = ?
+                  AND j.type = 'process_episode'
+                  AND j.status = 'running'
+                """,
+                (id,),
+            ).fetchone()
+            return row["count"] if row else 0
+
+    def list_pending_deletions(self) -> List[int]:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id
+                FROM subscriptions
+                WHERE deletion_status IN ('pending', 'failed')
+                   OR (
+                       deletion_status = 'cleaning'
+                       AND deletion_updated_at <= datetime(CURRENT_TIMESTAMP, '-5 minutes')
+                   )
+                ORDER BY deletion_started_at, id
+                """
+            ).fetchall()
+            return [row["id"] for row in rows]
+
+    def claim_deletion_cleanup(self, id: int) -> Optional[dict]:
+        """Claim retryable physical cleanup after all running workers have acknowledged."""
+        with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            running = conn.execute(
+                """
+                SELECT 1
+                FROM jobs j
+                JOIN episodes e ON e.id = j.episode_id
+                WHERE e.subscription_id = ?
+                  AND j.type = 'process_episode'
+                  AND j.status = 'running'
+                LIMIT 1
+                """,
+                (id,),
+            ).fetchone()
+            if running:
+                conn.commit()
+                return None
+
+            cursor = conn.execute(
+                """
+                UPDATE subscriptions
+                SET deletion_status = 'cleaning',
+                    deletion_updated_at = CURRENT_TIMESTAMP,
+                    deletion_error = NULL
+                WHERE id = ?
+                  AND (
+                      deletion_status IN ('pending', 'failed')
+                      OR (
+                          deletion_status = 'cleaning'
+                          AND deletion_updated_at <= datetime(CURRENT_TIMESTAMP, '-5 minutes')
+                      )
+                  )
+                """,
+                (id,),
+            )
+            if cursor.rowcount == 0:
+                conn.commit()
+                return None
+
+            row = conn.execute("SELECT * FROM subscriptions WHERE id = ?", (id,)).fetchone()
+            conn.commit()
+            return dict(row) if row else None
+
+    def mark_deletion_failed(self, id: int, error: str) -> None:
+        with get_db_connection() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET deletion_status = 'failed',
+                    deletion_updated_at = CURRENT_TIMESTAMP,
+                    deletion_error = ?
+                WHERE id = ?
+                """,
+                (error, id),
+            )
+            conn.commit()
+
     def delete(self, id: int):
         with get_db_connection() as conn:
+            conn.execute(
+                "DELETE FROM jobs WHERE episode_id IN (SELECT id FROM episodes WHERE subscription_id = ?)",
+                (id,),
+            )
             conn.execute("DELETE FROM episodes WHERE subscription_id = ?", (id,))
             conn.execute("DELETE FROM user_subscriptions WHERE subscription_id = ?", (id,))
             conn.execute("DELETE FROM subscriptions WHERE id = ?", (id,))
@@ -188,8 +363,17 @@ class EpisodeRepository:
             try:
                 cursor = conn.execute("""
                     INSERT INTO episodes (subscription_id, guid, title, pub_date, original_url, duration, description, status, file_size)
-                    VALUES (:subscription_id, :guid, :title, :pub_date, :original_url, :duration, :description, :status, :file_size)
+                    SELECT :subscription_id, :guid, :title, :pub_date, :original_url,
+                           :duration, :description, :status, :file_size
+                    WHERE EXISTS (
+                        SELECT 1 FROM subscriptions
+                        WHERE id = :subscription_id
+                          AND is_active = 1
+                          AND deletion_status IS NULL
+                    )
                 """, episode)
+                if cursor.rowcount == 0:
+                    return False
                 if episode.get("status") == "pending":
                     _enqueue_job(conn, cursor.lastrowid)
                 conn.commit()
@@ -351,6 +535,12 @@ class EpisodeRepository:
                     processing_flags = ?,
                     ai_summary = NULL
                 WHERE id = ?
+                  AND EXISTS (
+                      SELECT 1 FROM subscriptions s
+                      WHERE s.id = episodes.subscription_id
+                        AND s.is_active = 1
+                        AND s.deletion_status IS NULL
+                  )
             """, (processing_flags, id))
             JobRepository().cancel_active_for_episode(id, conn=conn)
             conn.commit()
@@ -369,10 +559,18 @@ class EpisodeRepository:
             """)
             conn.execute("""
                 UPDATE jobs
-                SET status = 'retry_scheduled',
+                SET status = CASE
+                        WHEN episode_id IN (SELECT id FROM episodes WHERE status = 'ignored')
+                            THEN 'cancelled'
+                        ELSE 'retry_scheduled'
+                    END,
                     locked_at = NULL,
                     locked_by = NULL,
-                    error = 'Interrupted by system restart',
+                    error = CASE
+                        WHEN episode_id IN (SELECT id FROM episodes WHERE status = 'ignored')
+                            THEN 'Cancellation acknowledged after worker restart'
+                        ELSE 'Interrupted by system restart'
+                    END,
                     next_run_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE status = 'running'
@@ -381,43 +579,87 @@ class EpisodeRepository:
 
     def update_retry(self, id: int, retry_count: int, next_retry_at: datetime, error: str):
         with get_db_connection() as conn:
-            conn.execute("""
+            cursor = conn.execute("""
                 UPDATE episodes 
                 SET status = 'failed', 
                     retry_count = ?, 
                     next_retry_at = ?, 
                     error_message = ? 
                 WHERE id = ?
+                  AND status = 'processing'
+                  AND EXISTS (
+                      SELECT 1 FROM subscriptions s
+                      WHERE s.id = episodes.subscription_id
+                        AND s.is_active = 1
+                        AND s.deletion_status IS NULL
+                  )
             """, (retry_count, next_retry_at, error, id))
-            _schedule_retry_job(conn, id, next_retry_at, error)
+            if cursor.rowcount:
+                _schedule_retry_job(conn, id, next_retry_at, error)
+            else:
+                JobRepository().cancel_active_for_episode(id, conn=conn)
             conn.commit()
 
     def update_rate_limited(self, id: int, next_retry_at: datetime, error: str):
         """Set episode to rate_limited status with scheduled retry at API quota reset."""
         with get_db_connection() as conn:
-            conn.execute("""
+            cursor = conn.execute("""
                 UPDATE episodes 
                 SET status = 'rate_limited', 
                     next_retry_at = ?, 
                     error_message = ?,
                     processing_step = 'Waiting for API quota reset'
                 WHERE id = ?
+                  AND status = 'processing'
+                  AND EXISTS (
+                      SELECT 1 FROM subscriptions s
+                      WHERE s.id = episodes.subscription_id
+                        AND s.is_active = 1
+                        AND s.deletion_status IS NULL
+                  )
             """, (next_retry_at, error, id))
-            _schedule_retry_job(conn, id, next_retry_at, error, status="rate_limited")
+            if cursor.rowcount:
+                _schedule_retry_job(conn, id, next_retry_at, error, status="rate_limited")
+            else:
+                JobRepository().cancel_active_for_episode(id, conn=conn)
             conn.commit()
 
     def update_status(self, id: int, status: str, error: str = None, filename: str = None, file_size: int = None):
         with get_db_connection() as conn:
-            conn.execute(
-                "UPDATE episodes SET status = ?, error_message = ?, local_filename = ?, file_size = ?, processed_at = ?, next_retry_at = NULL WHERE id = ?",
-                (status, error, filename, file_size, datetime.now() if status == 'completed' else None, id)
+            eligibility = ""
+            if status in {"pending", "completed", "failed"}:
+                eligibility = """
+                  AND EXISTS (
+                      SELECT 1 FROM subscriptions s
+                      WHERE s.id = episodes.subscription_id
+                        AND s.is_active = 1
+                        AND s.deletion_status IS NULL
+                  )
+                """
+            if status in {"completed", "failed"}:
+                eligibility += " AND status = 'processing'"
+            cursor = conn.execute(
+                f"""
+                UPDATE episodes
+                SET status = ?, error_message = ?, local_filename = ?, file_size = ?,
+                    processed_at = ?, next_retry_at = NULL
+                WHERE id = ? {eligibility}
+                """,
+                (status, error, filename, file_size, datetime.now() if status == 'completed' else None, id),
             )
             if status == "pending":
-                _enqueue_job(conn, id)
+                if cursor.rowcount:
+                    _enqueue_job(conn, id)
             elif status == "completed":
-                JobRepository().complete_for_episode(id, conn=conn)
+                if cursor.rowcount:
+                    JobRepository().complete_for_episode(id, conn=conn)
+                else:
+                    JobRepository().cancel_active_for_episode(id, conn=conn)
             elif status == "failed":
-                JobRepository().fail_running_for_episode(id, error or "Processing failed", conn=conn)
+                if cursor.rowcount:
+                    JobRepository().fail_running_for_episode(id, error or "Processing failed", conn=conn)
+                else:
+                    JobRepository().cancel_active_for_episode(id, conn=conn)
             conn.commit()
 
     def update_progress(self, id: int, step: str, progress: int, transcript_path: str = None, ad_report_path: str = None, report_path: str = None):
@@ -439,7 +681,7 @@ class EpisodeRepository:
                 
             params.append(id)
             
-            sql = f"UPDATE episodes SET {', '.join(updates)} WHERE id = ?"
+            sql = f"UPDATE episodes SET {', '.join(updates)} WHERE id = ? AND status = 'processing'"
             conn.execute(sql, params)
             conn.execute("""
                 UPDATE jobs
@@ -468,12 +710,24 @@ class EpisodeRepository:
                     UPDATE episodes 
                     SET status = ? 
                     WHERE subscription_id = ? AND guid = ? AND (status = ? or status = 'pending_manual')
+                      AND EXISTS (
+                          SELECT 1 FROM subscriptions s
+                          WHERE s.id = episodes.subscription_id
+                            AND s.is_active = 1
+                            AND s.deletion_status IS NULL
+                      )
                 """, (status, subscription_id, guid, condition_status))
             else:
                 cursor = conn.execute("""
                     UPDATE episodes 
                     SET status = ? 
                     WHERE subscription_id = ? AND guid = ?
+                      AND EXISTS (
+                          SELECT 1 FROM subscriptions s
+                          WHERE s.id = episodes.subscription_id
+                            AND s.is_active = 1
+                            AND s.deletion_status IS NULL
+                      )
                 """, (status, subscription_id, guid))
             if status == "pending" and cursor.rowcount:
                 row = conn.execute(
@@ -522,10 +776,11 @@ class EpisodeRepository:
             row = conn.execute("SELECT COUNT(*) as count FROM episodes WHERE status = 'processing'").fetchone()
             return row['count'] if row else 0
 
-    def soft_delete(self, id: int):
-        """Mark episode as ignored and clear paths to free space."""
+    def request_deletion(self, id: int) -> bool:
+        """Mark an episode ignored and cancel queued work while retaining running-job ownership."""
         with get_db_connection() as conn:
-            conn.execute("""
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute("""
                 UPDATE episodes 
                 SET status = 'ignored',
                     local_filename = NULL,
@@ -533,14 +788,49 @@ class EpisodeRepository:
                     ad_report_path = NULL,
                     report_path = NULL,
                     progress = 0,
-                    processing_step = NULL
+                    processing_step = 'cancellation requested',
+                    next_retry_at = NULL
                 WHERE id = ?
             """, (id,))
-            JobRepository().cancel_active_for_episode(id, conn=conn)
+            conn.execute("""
+                UPDATE jobs
+                SET status = 'cancelled',
+                    locked_at = NULL,
+                    locked_by = NULL,
+                    error = 'Cancelled because episode deletion was requested',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE episode_id = ?
+                  AND type = 'process_episode'
+                  AND status IN ('queued', 'retry_scheduled', 'rate_limited')
+            """, (id,))
+            conn.execute("""
+                UPDATE jobs
+                SET error = 'Cancellation requested because episode is being deleted',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE episode_id = ?
+                  AND type = 'process_episode'
+                  AND status = 'running'
+            """, (id,))
             conn.commit()
+            return cursor.rowcount > 0
+
+    def soft_delete(self, id: int):
+        """Backward-compatible alias for requesting safe episode deletion."""
+        return self.request_deletion(id)
 
 
 def _enqueue_job(conn: sqlite3.Connection, episode_id: int, job_type: str = "process_episode", priority: int = 100):
+    eligible = conn.execute("""
+        SELECT 1
+        FROM episodes e
+        JOIN subscriptions s ON s.id = e.subscription_id
+        WHERE e.id = ?
+          AND s.is_active = 1
+          AND s.deletion_status IS NULL
+    """, (episode_id,)).fetchone()
+    if not eligible:
+        return None
+
     existing = conn.execute("""
         SELECT id FROM jobs
         WHERE episode_id = ?
@@ -620,9 +910,23 @@ class JobRepository:
                 FROM jobs j
                 JOIN episodes e ON e.id = j.episode_id
                 WHERE j.status = 'running'
-                  AND e.status = 'processing'
+                  AND e.status IN ('processing', 'ignored')
             """).fetchone()
             return row["count"] if row else 0
+
+    def is_running_for_episode(self, episode_id: int) -> bool:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM jobs
+                WHERE episode_id = ?
+                  AND type = 'process_episode'
+                  AND status = 'running'
+                LIMIT 1
+                """,
+                (episode_id,),
+            ).fetchone()
+            return row is not None
 
     def count_claimable(self) -> int:
         with get_db_connection() as conn:
@@ -630,10 +934,13 @@ class JobRepository:
                 SELECT COUNT(*) AS count
                 FROM jobs j
                 JOIN episodes e ON e.id = j.episode_id
+                JOIN subscriptions s ON s.id = e.subscription_id
                 WHERE j.type = 'process_episode'
                   AND j.status IN ('queued', 'retry_scheduled', 'rate_limited')
                   AND (j.next_run_at IS NULL OR j.next_run_at <= CURRENT_TIMESTAMP)
                   AND e.status IN ('pending', 'failed', 'rate_limited')
+                  AND s.is_active = 1
+                  AND s.deletion_status IS NULL
             """).fetchone()
             return row["count"] if row else 0
 
@@ -644,6 +951,7 @@ class JobRepository:
             rows = conn.execute("""
                 SELECT e.id, e.status, e.next_retry_at
                 FROM episodes e
+                JOIN subscriptions s ON s.id = e.subscription_id
                 WHERE (
                     e.status = 'pending'
                     OR (
@@ -651,6 +959,8 @@ class JobRepository:
                         AND e.next_retry_at IS NOT NULL
                     )
                 )
+                AND s.is_active = 1
+                AND s.deletion_status IS NULL
                 AND NOT EXISTS (
                     SELECT 1
                     FROM jobs j
@@ -688,10 +998,13 @@ class JobRepository:
                        e.*
                 FROM jobs j
                 JOIN episodes e ON e.id = j.episode_id
+                JOIN subscriptions s ON s.id = e.subscription_id
                 WHERE j.type = 'process_episode'
                   AND j.status IN ('queued', 'retry_scheduled', 'rate_limited')
                   AND (j.next_run_at IS NULL OR j.next_run_at <= CURRENT_TIMESTAMP)
                   AND e.status IN ('pending', 'failed', 'rate_limited')
+                  AND s.is_active = 1
+                  AND s.deletion_status IS NULL
                 ORDER BY j.priority ASC, j.created_at ASC
                 LIMIT ?
             """, (limit,)).fetchall()
@@ -736,6 +1049,7 @@ class JobRepository:
                 WHERE j.type = 'process_episode'
                   AND j.status = 'running'
                   AND e.status != 'processing'
+                  AND e.status != 'ignored'
             """).fetchall()
 
             for row in inconsistent_rows:
@@ -750,6 +1064,30 @@ class JobRepository:
                     WHERE id = ?
                 """, (replacement_status, row["job_id"]))
 
+            stale_cancellations = conn.execute("""
+                SELECT j.id AS job_id
+                FROM jobs j
+                JOIN episodes e ON e.id = j.episode_id
+                WHERE j.type = 'process_episode'
+                  AND j.status = 'running'
+                  AND e.status = 'ignored'
+                  AND (
+                      COALESCE(j.updated_at, j.locked_at) IS NULL
+                      OR COALESCE(j.updated_at, j.locked_at) <= datetime(CURRENT_TIMESTAMP, ?)
+                  )
+            """, (stale_modifier,)).fetchall()
+
+            for row in stale_cancellations:
+                conn.execute("""
+                    UPDATE jobs
+                    SET status = 'cancelled',
+                        locked_at = NULL,
+                        locked_by = NULL,
+                        error = 'Cancellation acknowledged after stale worker timeout',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (row["job_id"],))
+
             rows = conn.execute("""
                 SELECT j.id AS job_id, j.episode_id
                 FROM jobs j
@@ -763,7 +1101,7 @@ class JobRepository:
                   )
             """, (stale_modifier,)).fetchall()
 
-            if not rows and not inconsistent_rows:
+            if not rows and not inconsistent_rows and not stale_cancellations:
                 conn.commit()
                 return 0
 
@@ -790,7 +1128,7 @@ class JobRepository:
             """, [(episode_id,) for episode_id in episode_ids])
 
             conn.commit()
-            return len(rows) + len(inconsistent_rows)
+            return len(rows) + len(inconsistent_rows) + len(stale_cancellations)
 
     def complete_for_episode(self, episode_id: int, conn: sqlite3.Connection | None = None):
         if conn is None:

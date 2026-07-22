@@ -19,6 +19,10 @@ class Subscription(SubscriptionBase):
     is_active: bool
     created_at: datetime
     last_checked_at: Optional[datetime] = None
+    deletion_status: Optional[str] = None
+    deletion_started_at: Optional[datetime] = None
+    deletion_updated_at: Optional[datetime] = None
+    deletion_error: Optional[str] = None
     
     # Granular Ad Removal Settings
     remove_ads: bool = True

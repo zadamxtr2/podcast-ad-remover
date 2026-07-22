@@ -42,3 +42,11 @@ For each queued episode:
 5.  **System** serves the processed audio file from the stored episode path.
 
 The public feed/audio path is not tied to a logged-in account by default. Admin-visible podcast stats can show how many user libraries include each podcast and the existing aggregate episode play count. Per-user download attribution would require token-attributed audio access logging and is not currently part of the data flow.
+
+## 4. Subscription Deletion
+
+1. The delete request atomically deactivates the subscription, marks its episodes ignored, and cancels all queued or retryable jobs.
+2. Running jobs retain their worker lock while cancellation is requested. Workers stop at their next safe checkpoint, remove worker-owned temporary artifacts, and then mark the job cancelled.
+3. The request waits asynchronously for up to ten seconds. If a worker has not stopped, it returns a pending result and leaves all podcast files in place.
+4. Once no running jobs remain, a single cleanup claimant removes the subscription directory and generated feed, regenerates the unified feed once, and deletes the related database rows.
+5. Partial filesystem or feed cleanup is recorded as failed and retried idempotently by the processor loop. A process interruption during cleanup can be reclaimed after five minutes.

@@ -53,3 +53,7 @@ Piper remains the default because it is local, offline, and does not consume API
 ## 2026-06-17: Keep the AI API opt-in and token-scoped
 
 The AI-facing integration surface is a REST API under `/api/v1`, disabled by default and protected by admin-managed bearer tokens. API tokens are separate from feed tokens, use explicit scopes, and have SQLite-backed rate limits so the feature fits the existing single-container SQLite deployment model.
+
+## 2026-07-22: Coordinate destructive subscription cleanup through SQLite
+
+The FastAPI app and episode processor run in separate processes, so in-memory locks cannot safely coordinate subscription deletion. Deletion uses durable subscription state and existing job locks: the database transaction prevents new claims and requests cancellation, running workers release their locks only after reaching a safe checkpoint, and one retryable cleanup claimant removes files and regenerates feeds outside the web event loop.

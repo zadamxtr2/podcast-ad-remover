@@ -99,6 +99,10 @@ Startup migration creates a `schema_migrations` table and backs up the current d
 
 Manual downloads and reprocess actions must use repository status helpers that enqueue a `jobs` row, not raw episode status updates. Queue cancellation is non-destructive: it marks the active job cancelled and returns the episode to `unprocessed`; deleting or ignoring an episode remains a separate action.
 
+Subscription deletion uses a durable two-phase lifecycle because the web app and processor run in separate processes. The first SQLite transaction sets `subscriptions.is_active = 0`, records `deletion_status = pending`, marks every episode ignored, cancels queued/retry jobs, and leaves running jobs locked until their workers acknowledge cancellation. Job repair and claiming only consider active subscriptions that are not being deleted.
+
+After a bounded asynchronous wait, cleanup is claimed through the subscription row and runs outside the FastAPI event loop. It removes the contained podcast directory and feed file, regenerates the unified feed once, and then removes the subscription, episode, and job rows. Failures leave the inactive subscription in `deletion_status = failed`; the processor loop retries failed or interrupted cleanup idempotently. A stale `cleaning` claim can be reclaimed after five minutes.
+
 ### Feed Access
 
 RSS feeds and audio files remain public when feed authentication is disabled. When feed authentication is enabled, generated dashboard links use bearer tokens:

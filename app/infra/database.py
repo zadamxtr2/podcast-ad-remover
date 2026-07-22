@@ -177,6 +177,19 @@ FORMAL_MIGRATIONS = [
             """,
         ],
     ),
+    (
+        "20260722_0008_subscription_deletion",
+        [
+            "ALTER TABLE subscriptions ADD COLUMN deletion_status TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN deletion_started_at TIMESTAMP",
+            "ALTER TABLE subscriptions ADD COLUMN deletion_updated_at TIMESTAMP",
+            "ALTER TABLE subscriptions ADD COLUMN deletion_error TEXT",
+            """
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_deletion_status
+            ON subscriptions(deletion_status, deletion_updated_at)
+            """,
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000

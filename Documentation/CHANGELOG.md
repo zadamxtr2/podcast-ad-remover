@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.8.0 - 2026-07-22
+
+- Fixed subscription deletion during active processing by atomically deactivating the podcast, cancelling queued work, waiting a bounded time for running workers to acknowledge cancellation, and deferring retryable file cleanup when a worker is still active.
+- Moved subscription file and feed cleanup off the FastAPI event loop, prevented new episode claims after deletion starts, and regenerated the unified feed once after successful cleanup.
+- Added durable subscription-deletion state and regression coverage for concurrent deletion, route responsiveness, bounded waits, cleanup failures, retries, and idempotent repeated deletion.
+
 ## 1.7.2 - 2026-07-18
 
 - Fixed feed processing so malformed non-numeric podcast enclosure lengths are treated as unknown instead of aborting the feed, with regression coverage for feed parsing and episode discovery.

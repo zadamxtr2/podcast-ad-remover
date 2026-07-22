@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 class Processor:
     _active_task_ids = set()
     _queue_lock = asyncio.Lock()  # Prevent race conditions in process_queue
+    DELETION_ACK_TIMEOUT_SECONDS = 10.0
+    DELETION_POLL_INTERVAL_SECONDS = 0.1
 
     def __init__(self):
         self.ep_repo = EpisodeRepository()
@@ -54,6 +56,48 @@ class Processor:
 
         shutil.rmtree(target)
         logger.info(f"{action.capitalize()} episode directory: {target}")
+        return True
+
+    def _remove_subscription_directory(self, subscription_slug: str) -> bool:
+        """Idempotently remove one subscription directory within podcast storage."""
+        podcasts_root = Path(settings.PODCASTS_DIR).resolve()
+        target = (podcasts_root / subscription_slug).resolve()
+        try:
+            relative = target.relative_to(podcasts_root)
+        except ValueError:
+            logger.error(f"Refusing to delete subscription outside podcast storage: {target}")
+            return False
+        if not relative.parts:
+            logger.error(f"Refusing to delete podcast storage root: {target}")
+            return False
+        if not target.exists():
+            return True
+        if not target.is_dir():
+            logger.warning(f"Refusing to delete non-directory subscription path: {target}")
+            return False
+        shutil.rmtree(target)
+        logger.info(f"Deleted subscription directory: {target}")
+        return True
+
+    def _remove_subscription_feed(self, subscription_slug: str) -> bool:
+        """Idempotently remove one generated feed within the configured feed directory."""
+        feeds_root = Path(settings.FEEDS_DIR).resolve()
+        target = (feeds_root / f"{subscription_slug}.xml").resolve()
+        try:
+            relative = target.relative_to(feeds_root)
+        except ValueError:
+            logger.error(f"Refusing to delete subscription feed outside feed storage: {target}")
+            return False
+        if not relative.parts:
+            logger.error(f"Refusing to delete feed storage root: {target}")
+            return False
+        if not target.exists():
+            return True
+        if not target.is_file():
+            logger.warning(f"Refusing to delete non-file subscription feed path: {target}")
+            return False
+        target.unlink()
+        logger.info(f"Deleted subscription feed: {target}")
         return True
 
     def _remove_file_if_exists(self, path: str, action: str) -> None:
@@ -162,34 +206,89 @@ class Processor:
         await self.process_queue() # Trigger queue processing
 
     async def delete_episode(self, episode_id: int):
-        """Hard delete an episode and all associated files."""
-        ep = self.ep_repo.get_by_id(episode_id)
+        """Ignore an episode, wait for its worker, then remove artifacts safely."""
+        ep = await asyncio.to_thread(self.ep_repo.get_by_id, episode_id)
         if not ep:
             return False
         
         # Get subscription for slug
-        sub = self.sub_repo.get_by_id(ep.subscription_id)
+        sub = await asyncio.to_thread(self.sub_repo.get_by_id, ep.subscription_id)
         if not sub:
             return False
-            
-        # Delete entire episode directory
+
+        await asyncio.to_thread(self.ep_repo.request_deletion, episode_id)
+
+        deadline = asyncio.get_running_loop().time() + self.DELETION_ACK_TIMEOUT_SECONDS
+        while await asyncio.to_thread(self.job_repo.is_running_for_episode, episode_id):
+            if asyncio.get_running_loop().time() >= deadline:
+                logger.warning(
+                    f"Timed out waiting for episode {episode_id} worker cancellation; "
+                    "the worker will clean up at its next checkpoint"
+                )
+                break
+            await asyncio.sleep(self.DELETION_POLL_INTERVAL_SECONDS)
+
         episode_slug = f"{ep.guid}".replace("/", "_").replace(" ", "_")
         episode_dir = settings.get_episode_dir(sub.slug, episode_slug)
-        
-        if os.path.exists(episode_dir):
+        if not await asyncio.to_thread(self.job_repo.is_running_for_episode, episode_id):
             try:
-                self._remove_episode_directory(episode_dir, "delete")
+                await asyncio.to_thread(self._remove_episode_directory, episode_dir, "delete")
             except Exception as e:
                 logger.warning(f"Failed to delete episode directory {episode_dir}: {e}")
 
-        # Soft delete from DB (marks as ignored, keeps GUID to prevent re-download)
-        self.ep_repo.soft_delete(episode_id)
-
-        # Regenerate feeds immediately so the episode is removed
-        self.rss_gen.generate_feed(sub.id)
-        self.rss_gen.generate_unified_feed()
-        
+        await asyncio.to_thread(self.rss_gen.generate_feed, sub.id)
+        await asyncio.to_thread(self.rss_gen.generate_unified_feed)
         return True
+
+    def _finalize_subscription_deletion(self, subscription_id: int) -> str:
+        """Run one claimed, retryable subscription cleanup outside the web event loop."""
+        sub = self.sub_repo.claim_deletion_cleanup(subscription_id)
+        if not sub:
+            return "deletion_pending"
+
+        try:
+            if not self._remove_subscription_directory(sub["slug"]):
+                raise RuntimeError("subscription directory failed path-containment validation")
+            if not self._remove_subscription_feed(sub["slug"]):
+                raise RuntimeError("subscription feed failed path-containment validation")
+            self.rss_gen.generate_unified_feed()
+            self.sub_repo.delete(subscription_id)
+            logger.info(f"Completed deletion of subscription {subscription_id} ({sub['title']})")
+            return "deleted"
+        except Exception as e:
+            logger.error(f"Subscription {subscription_id} cleanup failed and will be retried: {e}")
+            self.sub_repo.mark_deletion_failed(subscription_id, str(e))
+            return "deletion_pending"
+
+    async def delete_subscription(self, subscription_id: int) -> str:
+        """Atomically cancel a subscription, wait briefly for workers, and clean it up."""
+        sub = await asyncio.to_thread(self.sub_repo.begin_deletion, subscription_id)
+        if not sub:
+            return "deleted"
+
+        deadline = asyncio.get_running_loop().time() + self.DELETION_ACK_TIMEOUT_SECONDS
+        while await asyncio.to_thread(self.sub_repo.count_running_deletion_jobs, subscription_id):
+            if asyncio.get_running_loop().time() >= deadline:
+                logger.warning(
+                    f"Subscription {subscription_id} deletion is pending worker acknowledgement; "
+                    "cleanup will be retried by the processor loop"
+                )
+                return "deletion_pending"
+            await asyncio.sleep(self.DELETION_POLL_INTERVAL_SECONDS)
+
+        return await asyncio.to_thread(self._finalize_subscription_deletion, subscription_id)
+
+    async def finalize_pending_subscription_deletions(self) -> int:
+        """Retry safe cleanup for deletions whose workers have exited."""
+        subscription_ids = await asyncio.to_thread(self.sub_repo.list_pending_deletions)
+        completed = 0
+        for subscription_id in subscription_ids:
+            if await asyncio.to_thread(self.sub_repo.count_running_deletion_jobs, subscription_id):
+                continue
+            result = await asyncio.to_thread(self._finalize_subscription_deletion, subscription_id)
+            if result == "deleted":
+                completed += 1
+        return completed
 
     async def version_episode(self, episode_id: int):
         """
@@ -474,6 +573,10 @@ class Processor:
                     severity="error",
                 )
                 return
+            if not sub.is_active or sub.deletion_status is not None:
+                logger.info(f"Skipping episode {ep.id}; subscription deletion is in progress")
+                self.job_repo.cancel_active_for_episode(ep_id)
+                return
 
             # Actually run the processing
             await self._process_episode_inner(ep, sub, ep_dict)
@@ -487,6 +590,8 @@ class Processor:
                 severity="error",
             )
         finally:
+            if self.ep_repo.get_status(ep_id) != "processing":
+                self.job_repo.cancel_active_for_episode(ep_id)
             # Ensure ID is removed from active set
             Processor._active_task_ids.discard(ep_id)
             try:
@@ -511,7 +616,6 @@ class Processor:
         ffmpeg_threads = int(global_settings.get("ffmpeg_threads") or 0)
         
         try:
-            self.ep_repo.update_status(ep.id, "processing")
             self.ep_repo.update_progress(ep.id, "Actively Processing", 0)
             
             if not self._check_cancellation(ep): return
@@ -674,7 +778,7 @@ class Processor:
                     # Catch cancellation exception from thread
                     if "CancelledByUser" in str(e) or cancellation_state['is_cancelled']:
                         logger.warning(f"Transcription cancelled for {ep.title}")
-                        self._cleanup_artifacts(ep)
+                        self._acknowledge_cancellation(ep)
                         return # Stop processing this episode
                     raise e
                 
@@ -682,7 +786,7 @@ class Processor:
                 
                 # Double check state
                 if cancellation_state['is_cancelled']:
-                     self._cleanup_artifacts(ep)
+                     self._acknowledge_cancellation(ep)
                      return
 
                 duration = (datetime.now() - start_time).total_seconds()
@@ -997,6 +1101,10 @@ class Processor:
             )
 
         except RateLimitError as e:
+            if self.ep_repo.get_status(ep.id) != "processing":
+                logger.info(f"Discarding rate-limit result for cancelled episode {ep.id}")
+                self._acknowledge_cancellation(ep)
+                return
             # Special handling for API rate limits - wait until quota resets
             logger.warning(f"Rate limit hit for episode {ep.id}: {e}")
             next_retry = e.get_next_retry_time()
@@ -1005,6 +1113,11 @@ class Processor:
             self.ep_repo.update_rate_limited(ep.id, next_retry, str(e))
             
         except Exception as e:
+            if self.ep_repo.get_status(ep.id) != "processing":
+                logger.info(f"Episode {ep.id} stopped because cancellation was requested")
+                self._acknowledge_cancellation(ep)
+                return
+
             logger.error(f"Failed to process episode {ep.id}: {e}")
             
             # Check if this might be a rate limit we didn't catch
@@ -1047,9 +1160,14 @@ class Processor:
         current_status = self.ep_repo.get_status(ep.id)
         if current_status != 'processing':
             logger.warning(f"Processing cancelled for {ep.title} (Status changed to {current_status})")
-            self._cleanup_artifacts(ep)
+            self._acknowledge_cancellation(ep)
             return False
         return True
+
+    def _acknowledge_cancellation(self, ep: Episode) -> None:
+        """Clean worker-owned artifacts before releasing the durable running-job lock."""
+        self._cleanup_artifacts(ep)
+        self.job_repo.cancel_active_for_episode(ep.id)
 
     def _cleanup_artifacts(self, ep: Episode):
         """Cleanup temporary files for a cancelled episode."""
@@ -1199,10 +1317,13 @@ class Processor:
             interval_seconds = interval_minutes * 60
             
             try:
-                # 1. Always process queue (high frequency)
+                # 1. Finish any subscription deletions whose workers have acknowledged cancellation.
+                await self.finalize_pending_subscription_deletions()
+
+                # 2. Always process queue (high frequency)
                 await self.process_queue()
                 
-                # 2. Check Feeds (low frequency)
+                # 3. Check Feeds (low frequency)
                 now = datetime.now()
                 if (now - last_feed_check).total_seconds() > interval_seconds:
                     logger.info("Interval reached. Checking feeds/maintenance...")

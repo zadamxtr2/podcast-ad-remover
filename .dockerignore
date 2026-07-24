@@ -1,9 +1,12 @@
 __pycache__
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
 .agent/
+.codex-remote-attachments/
 env/
 venv/
 .venv/
@@ -13,6 +16,7 @@ venv/
 .vscode
 .idea
 node_modules/
+**/node_modules/
 npm-debug.log
 data/
 downloads/
@@ -24,3 +28,4 @@ scripts/
 tests/
 *.log
 debugfiles/
+temp_modeltests/

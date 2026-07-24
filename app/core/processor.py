@@ -1144,6 +1144,14 @@ class Processor:
     async def cleanup_old_episodes(self):
         """Clean up episodes per retention policies: Manual (Time) + Auto (Count)."""
         from app.infra.database import get_db_connection
+        from app.web.router import get_global_settings
+        
+        # Check if auto cleanup is enabled
+        global_settings = get_global_settings()
+        if not global_settings.get('auto_cleanup_enabled', 1):
+            logger.debug("Auto cleanup is disabled, skipping episode cleanup")
+            return
+        
         try:
             ids_to_delete = []
             with get_db_connection() as conn:

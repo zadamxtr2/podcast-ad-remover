@@ -1890,6 +1890,7 @@ async def update_global_subscription_settings(
     default_download_order: str = Form("newest"),
     whitelist_mode: bool = Form(False),
     default_auto_download_next: bool = Form(False),
+    auto_cleanup_enabled: bool = Form(False),
     default_min_speakers: int = Form(1),
     default_max_speakers: int = Form(20),
     admin_user = Depends(require_admin)
@@ -1911,6 +1912,7 @@ async def update_global_subscription_settings(
                 default_download_order = ?,
                 whitelist_mode = ?,
                 default_auto_download_next = ?,
+                auto_cleanup_enabled = ?,
                 default_min_speakers = ?,
                 default_max_speakers = ?
             WHERE id = 1
@@ -1919,7 +1921,8 @@ async def update_global_subscription_settings(
             default_ai_rewrite_description, default_ai_audio_summary, default_append_title_intro,
             default_retention_limit, default_retention_days, default_manual_retention_days,
             default_custom_instructions, default_download_order, 1 if whitelist_mode else 0,
-            1 if default_auto_download_next else 0, default_min_speakers, default_max_speakers
+            1 if default_auto_download_next else 0, 1 if auto_cleanup_enabled else 0,
+            default_min_speakers, default_max_speakers
         ))
         conn.commit()
         

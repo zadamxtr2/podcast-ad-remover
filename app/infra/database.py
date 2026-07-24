@@ -204,6 +204,12 @@ FORMAL_MIGRATIONS = [
             "ALTER TABLE subscriptions ADD COLUMN transcription_method TEXT DEFAULT NULL",
         ],
     ),
+    (
+        "20260720_0012_auto_cleanup_toggle",
+        [
+            "ALTER TABLE app_settings ADD COLUMN auto_cleanup_enabled INTEGER DEFAULT 1",
+        ],
+    ),
 ]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000

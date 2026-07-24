@@ -55,6 +55,17 @@
 
             <div class="pt-4 border-t border-white/[0.08]">
                 <h4 class="font-semibold mb-3">Default Retention Policy</h4>
+                <div class="flex items-start gap-3 mb-4">
+                    <input type="checkbox" name="auto_cleanup_enabled" id="auto_cleanup_enabled"
+                        class="mt-1 h-4 w-4 text-primary-500 rounded bg-surface-base border-white/20 focus:ring-primary-500"
+                        {% if settings.auto_cleanup_enabled %}checked{% endif %}>
+                    <div>
+                        <label for="auto_cleanup_enabled" class="text-sm font-medium text-text-secondary cursor-pointer">Enable Automatic Episode Cleanup</label>
+                        <p class="text-xs text-text-muted mt-1">
+                            When enabled, automatically delete completed episodes that exceed retention limits (older episodes when newer ones are available).
+                        </p>
+                    </div>
+                </div>
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm text-text-secondary mb-2">Auto-Downloads (Episodes to Keep)</label>

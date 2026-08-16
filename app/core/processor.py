@@ -154,7 +154,7 @@ class Processor:
         return total
 
     async def check_feeds(self, subscription_id: int = None, limit: int = 5):
-        """Check subscriptions for new episodes."""
+        """Check subscriptions for new episodes and maintain N fresh episodes pool."""
         
         if subscription_id:
             sub = self.sub_repo.get_by_id(subscription_id)
@@ -168,37 +168,106 @@ class Processor:
                 # Limit of 0 is valid (means skip initial downloads)
                 actual_limit = sub.retention_limit if sub.retention_limit is not None else limit
                 logger.info(f"Checking {sub.title} (Sub Limit: {sub.retention_limit}, Ref Limit: {limit}, Final Limit: {actual_limit})...")
-
-                # Fetch ALL episodes
-                episodes = FeedManager.parse_episodes(sub.feed_url)
                 
-                for i, ep_data in enumerate(episodes):
+                # Fetch ALL episodes from feed
+                new_episodes_from_feed = FeedManager.parse_episodes(sub.feed_url)
+                
+                # Get existing episodes for this subscription, sorted by pub_date DESC
+                with get_db_connection() as conn:
+                    rows = conn.execute("""
+                        SELECT id, guid, title, pub_date, status, listen_count, 
+                               file_size, transcript_path, ad_report_path
+                        FROM episodes
+                        WHERE subscription_id = ? AND is_active = 1 AND deletion_status IS NULL
+                        ORDER BY pub_date DESC
+                    """, (sub.id,)).fetchall()
+                    
+                existing_episodes = []
+                for row in rows:
+                    existing_episodes.append({
+                        'id': row['id'],
+                        'guid': row['guid'],
+                        'title': row['title'],
+                        'pub_date': row['pub_date'],
+                        'status': row['status'],
+                        'listen_count': row['listen_count'] or 0,
+                        'file_size': row['file_size'],
+                        'transcript_path': row['transcript_path'],
+                        'ad_report_path': row['ad_report_path'],
+                    })
+                
+                # Find episodes from feed that don't exist yet (new episodes)
+                existing_guids = {ep['guid'] for ep in existing_episodes}
+                new_episodes = [e for e in new_episodes_from_feed if e.get('guid') not in existing_guids]
+                
+                # Add subscription_id to new episodes
+                for ep_data in new_episodes:
                     ep_data['subscription_id'] = sub.id
+
+        # Get all completed episodes for pool maintenance (including those already listened to).
+        # We need these so we can re-queue them when the user has consumed all available episodes.
+        completed_episodes = [
+            e for e in existing_episodes 
+            if e['status'] == 'completed' and e.get('pub_date') is not None
+        ]
+        # Filter out episodes that have already been listened to (listen_count > 0)
+        unlistened_completed = [e for e in completed_episodes if e.get('listen_count', 0) == 0]
+                
+                # Maintain a pool of N fresh un-listened-to episodes.
+                # If we have fewer than actual_limit un-listened-to, mark oldest completed ones as pending
+                # so they get re-downloaded and processed again for the user to listen to.
+                while len(unlistened_completed) < actual_limit:
+                    # Sort by pub_date ASC to get oldest first (oldest = most consumed)
+                    sorted_unlistened = sorted(
+                        unlistened_completed, 
+                        key=lambda e: e.get('pub_date') or datetime.min
+                    )
                     
-                    # Determine status based on limit
-                    should_be_pending = i < actual_limit
-                    
-                    if should_be_pending:
-                        ep_data['status'] = 'pending'
-                    else:
-                        ep_data['status'] = 'unprocessed'
+                    if not sorted_unlistened:
+                        break
                         
-                    # Try to create. If exists, it returns False.
-                    if self.ep_repo.create_or_ignore(ep_data):
-                        if should_be_pending:
-                            logger.info(f"New episode queued: {ep_data['title']}")
+                    oldest = sorted_unlistened[0]
+                    existing_guid = oldest['guid']
+                    
+                    # Check if already pending/processing (safety check)
+                    with get_db_connection() as conn2:
+                        exists = conn2.execute(
+                            "SELECT 1 FROM episodes WHERE subscription_id = ? AND guid = ? AND status='completed'", 
+                            (sub.id, existing_guid)
+                        ).fetchone()
+                    
+                    if not exists or exists[0] is None:
+                        # Mark as pending for re-processing (will be re-downloaded and processed again)
+                        self.ep_repo.update_status_by_guid(
+                            sub.id, 
+                            existing_guid, 
+                            'pending'
+                        )
+                        logger.info(f"Re-queuing old episode to maintain fresh pool of {actual_limit}: {oldest['title']}")
+                        unlistened_completed.remove(oldest)
                     else:
-                        # Episode exists. Backfill if needed.
-                        # If we want it pending, and it's currently unprocessed (or failed), retry it.
-                        if should_be_pending:
-                            self.ep_repo.update_status_by_guid(
-                                sub.id, 
-                                ep_data['guid'], 
-                                'pending', 
-                                condition_status='unprocessed'
-                            )
+                        # Already in queue, break out
+                        break
+                
+                # Update listen_count for completed episodes that have been processed
+                if existing_episodes:
+                    with get_db_connection() as conn:
+                        update_stmt = "UPDATE episodes SET listen_count = COALESCE(listen_count + 1, 1) WHERE subscription_id = ? AND status = 'completed' AND pub_date IS NOT NULL"
+                        for ep in existing_episodes:
+                            if ep['status'] == 'completed':
+                                conn.execute(
+                                    "UPDATE episodes SET listen_count = COALESCE(listen_count + 1, 1) WHERE id = ?", 
+                                    (ep['id'],)
+                                )
+                    conn.commit()
+                
+                # Try to create new episodes from feed
+                for ep_data in new_episodes:
+                    if self.ep_repo.create_or_ignore(ep_data):
+                        logger.info(f"New episode queued: {ep_data['title']}")
             except Exception as e:
                 logger.error(f"Error checking feed {sub.feed_url}: {e}")
+
 
     async def process_episode(self, episode_id: int):
         """Force process a specific episode."""
@@ -1087,6 +1156,7 @@ class Processor:
                 os.remove(input_path)
             
             file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            await asyncio.to_thread(self.ep_repo.increment_listen_count, ep.id)
             self.ep_repo.update_status(ep.id, "completed", filename=output_path, file_size=file_size)
             self.ep_repo.update_progress(ep.id, "completed", 100)
             
@@ -1431,3 +1501,4 @@ def start_processor_process():
         loop.run_until_complete(run_until_stopped())
     finally:
         loop.close()
+

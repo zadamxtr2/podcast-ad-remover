@@ -154,7 +154,7 @@ class Processor:
         return total
 
     async def check_feeds(self, subscription_id: int = None, limit: int = 5):
-        """Check subscriptions for new episodes."""
+        """Check subscriptions for new episodes and manage backlog intelligently."""
         
         if subscription_id:
             sub = self.sub_repo.get_by_id(subscription_id)
@@ -162,41 +162,110 @@ class Processor:
         else:
             subs = self.sub_repo.get_all()
             
+        from datetime import datetime
+        
+        # Check if intelligent backlog is enabled globally
+        enable_intelligent_backlog = settings.ENABLE_INTELLIGENT_BACKLOG
+        
         for sub in subs:
             try:
                 # Use subscription limit if set, else default. 
                 # Limit of 0 is valid (means skip initial downloads)
                 actual_limit = sub.retention_limit if sub.retention_limit is not None else limit
-                logger.info(f"Checking {sub.title} (Sub Limit: {sub.retention_limit}, Ref Limit: {limit}, Final Limit: {actual_limit})...")
+                
+                # Track backlog state per subscription
+                # Get completed count for intelligent backlog processing
+                try:
+                    completed_count = int(self.ep_repo.count_completed(sub.id) or 0)
+                except (TypeError, ValueError):
+                    completed_count = 0
+                
+                logger.info(f"Checking {sub.title} (Completed: {completed_count}, Limit: {actual_limit})...")
 
                 # Fetch ALL episodes
                 episodes = FeedManager.parse_episodes(sub.feed_url)
                 
+                # Only use intelligent backlog if enabled globally
+                if enable_intelligent_backlog:
+                    backlog_needed = max(0, actual_limit - completed_count)
+                else:
+                    backlog_needed = 0
+                
+                last_backlog_checked = datetime.now()
+                last_backlog_checked = datetime.now()
+                
                 for i, ep_data in enumerate(episodes):
                     ep_data['subscription_id'] = sub.id
                     
-                    # Determine status based on limit
-                    should_be_pending = i < actual_limit
-                    
-                    if should_be_pending:
-                        ep_data['status'] = 'pending'
+                    # Determine status based on position and backlog needs
+                    if i < actual_limit:
+                        # Within retention limit
+                        
+                        if backlog_needed > 0:
+                            # Need to fill backlog - prioritize older episodes
+                            
+                            # Calculate priority for this episode (lower = higher priority)
+                            pub_date = ep_data.get('pub_date')
+                            backlog_priority = None
+                            if pub_date:
+                                try:
+                                    from datetime import datetime as dt
+                                    pub_date_obj = dt.fromisoformat(str(pub_date))
+                                    # Priority based on age (older = higher priority)
+                                    # Scale: 1 week = ~5 priority points, capped at 1-100
+                                    days_since_midnight = (datetime.now() - pub_date_obj).days
+                                    backlog_priority = min(100, max(1, days_since_midnight // 7 + completed_count))
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # Determine if this episode should be pending based on backlog position
+                            # We want to fill the backlog with the oldest episodes within retention limit
+                            # position_from_oldest_in_limit = 0 is the oldest, increases as we go newer
+                            
+                            if i < backlog_needed and ep_data.get('status') != 'completed':
+                                ep_data['status'] = 'pending'
+                                ep_data['backlog_priority'] = backlog_priority
+                                logger.info(f"Backlog queued: {ep_data['title']}")
+                            else:
+                                ep_data['status'] = 'unprocessed'
+                            
+                        else:
+                            # No backlog needed - mark only newest as pending
+                            episodes_remaining_in_limit = actual_limit - i
+                            if i < episodes_remaining_in_limit and ep_data.get('status') != 'completed':
+                                ep_data['status'] = 'pending'
+                            else:
+                                ep_data['status'] = 'unprocessed'
                     else:
                         ep_data['status'] = 'unprocessed'
                         
                     # Try to create. If exists, it returns False.
-                    if self.ep_repo.create_or_ignore(ep_data):
-                        if should_be_pending:
-                            logger.info(f"New episode queued: {ep_data['title']}")
-                    else:
-                        # Episode exists. Backfill if needed.
-                        # If we want it pending, and it's currently unprocessed (or failed), retry it.
-                        if should_be_pending:
+                    created = self.ep_repo.create_or_ignore(ep_data)
+                    
+                    if created and ep_data.get('status') == 'pending':
+                        logger.info(f"New episode queued: {ep_data['title']}")
+                    elif not created and ep_data.get('status') != 'completed':
+                        # Episode already exists - update status if needed (for existing episodes)
+                        if ep_data.get('status') == 'pending':
                             self.ep_repo.update_status_by_guid(
                                 sub.id, 
                                 ep_data['guid'], 
                                 'pending', 
                                 condition_status='unprocessed'
                             )
+                
+                # Update last backlog check timestamp
+                try:
+                    from app.infra.database import get_db_connection
+                    with get_db_connection() as conn:
+                        conn.execute(
+                            "UPDATE subscriptions SET last_backlog_checked_at = ? WHERE id = ?",
+                            (datetime.now(), sub.id)
+                        )
+                        conn.commit()
+                except Exception as e:
+                    logger.warning(f"Failed to update last_backlog_checked_at for subscription {sub.id}: {e}")
+                    
             except Exception as e:
                 logger.error(f"Error checking feed {sub.feed_url}: {e}")
 
@@ -544,7 +613,11 @@ class Processor:
             claimed = self.job_repo.claim_due(capacity)
             if not claimed:
                 return
-
+            
+            # Sort by priority (NULL last, then ascending - lower number = higher priority)
+            claimed.sort(key=lambda x: (x.get('backlog_priority') is None, 
+                                        x.get('backlog_priority', 999)))
+            
             for ep_dict in claimed:
                 ep_id = ep_dict['id']
                 
@@ -557,6 +630,90 @@ class Processor:
                 
                 # Start background task
                 asyncio.create_task(self._process_single_episode_task(ep_dict))
+
+    async def _recheck_backlog_needs(self):
+        """Re-evaluate backlog after initial processing to promote next candidates."""
+        subs = self.sub_repo.get_all()
+        
+        for sub in subs:
+            try:
+                completed_count = int(self.ep_repo.count_completed(sub.id) or 0)
+                actual_limit = sub.retention_limit or 5
+                
+                if completed_count < actual_limit:
+                    # Backlog still needed - check if any unprocessed should be promoted
+                    backlog_needed = actual_limit - completed_count
+                    
+                    # Get latest episodes from feed to check for candidates
+                    try:
+                        all_episodes = FeedManager.parse_episodes(sub.feed_url)
+                        
+                        for i, ep_data in enumerate(all_episodes):
+                            # Only consider episodes within retention limit range
+                            if i >= actual_limit:
+                                break
+                            
+                            # Skip if already completed or pending
+                            if ep_data.get('status') == 'completed':
+                                continue
+                            
+                            if ep_data.get('status') == 'pending':
+                                continue
+                            
+                            # This is an unprocessed episode within retention limit
+                            # Check if it should be promoted to pending based on backlog position
+                            episodes_remaining_in_limit = actual_limit - i
+                            
+                            if i < episodes_remaining_in_limit:
+                                # Within the newest N episodes, check if we need this one for backlog
+                                
+                                # Calculate how many completed + unprocessed we have in retention range
+                                total_in_range = len(all_episodes[:actual_limit])
+                                
+                                # Count pending episodes in range
+                                pending_count = sum(1 for j in range(actual_limit) 
+                                                     if all_episodes[j].get('status') == 'pending')
+                                
+                                # We need enough pending to reach backlog_needed after processing completes
+                                needed_pending = backlog_needed - pending_count + 1
+                                
+                                if needed_pending > 0:
+                                    # Promote oldest unprocessed in retention range
+                                    ep_data['status'] = 'pending'
+                                    
+                                    # Calculate priority
+                                    pub_date = ep_data.get('pub_date')
+                                    backlog_priority = None
+                                    if pub_date:
+                                        try:
+                                            from datetime import datetime as dt
+                                            pub_date_obj = dt.fromisoformat(str(pub_date))
+                                        except (ValueError, TypeError):
+                                            pass
+                                        
+                                        if pub_date_obj:
+                                            days_since_midnight = (datetime.now() - pub_date_obj).days
+                                            backlog_priority = min(100, max(1, days_since_midnight // 7 + completed_count))
+                                        else:
+                                            backlog_priority = None
+                                    
+                                    ep_data['backlog_priority'] = backlog_priority
+                                    
+                                    # Update status in DB
+                                    self.ep_repo.update_status_by_guid(
+                                        sub.id, 
+                                        ep_data['guid'], 
+                                        'pending', 
+                                        condition_status='unprocessed'
+                                    )
+                                    logger.info(f"Promoted to backlog: {ep_data['title']}")
+                                
+                                if needed_pending <= 0:
+                                    break
+                    except Exception as e:
+                        logger.warning(f"Failed to recheck backlog for subscription {sub.id}: {e}")
+            except Exception as e:
+                logger.warning(f"Skipping subscription {sub.id} in backlog recheck: {e}")
 
     async def _process_single_episode_task(self, ep_dict: dict):
         """Wrapper to manage active task state and call the actual processor."""
@@ -1345,6 +1502,12 @@ class Processor:
                     await self.cleanup_old_logs()
                     await self.cleanup_old_episodes()
                     await self.check_feeds()
+                    
+                    # Re-evaluate backlog after initial processing (if enabled)
+                    if settings.ENABLE_INTELLIGENT_BACKLOG:
+                        logger.info("Intelligent backlog processing enabled; re-evaluating backlog needs...")
+                        await self._recheck_backlog_needs()
+                    
                     last_feed_check = datetime.now()
                 
             except Exception as e:

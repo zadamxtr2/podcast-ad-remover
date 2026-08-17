@@ -466,6 +466,9 @@ Transcript Context: {transcript_context}""",))
         "ALTER TABLE subscriptions ADD COLUMN custom_instructions TEXT",
         "ALTER TABLE subscriptions ADD COLUMN append_summary BOOLEAN DEFAULT 0",
         "ALTER TABLE subscriptions ADD COLUMN append_title_intro BOOLEAN DEFAULT 0",
+        # Intelligent backlog processing columns
+        "ALTER TABLE episodes ADD COLUMN backlog_priority INTEGER DEFAULT NULL",
+        "ALTER TABLE subscriptions ADD COLUMN last_backlog_checked_at TIMESTAMP DEFAULT NULL",
         
         # New prompt migrations
         "ALTER TABLE app_settings ADD COLUMN ad_prompt_base TEXT",
@@ -525,7 +528,17 @@ Transcript Context: {transcript_context}""",))
         "ALTER TABLE app_settings ADD COLUMN whitelist_mode INTEGER DEFAULT 0",
 
         # Transcription engine selection (faster-whisper or whisperx)
-        "ALTER TABLE app_settings ADD COLUMN transcription_engine TEXT DEFAULT 'faster-whisper'"
+        "ALTER TABLE app_settings ADD COLUMN transcription_engine TEXT DEFAULT 'faster-whisper'",
+
+        # Intelligent backlog processing columns
+        "ALTER TABLE episodes ADD COLUMN backlog_priority INTEGER DEFAULT NULL",
+        "ALTER TABLE subscriptions ADD COLUMN last_backlog_checked_at TIMESTAMP DEFAULT NULL",
+        """CREATE INDEX IF NOT EXISTS idx_episodes_backlog_priority 
+           ON episodes(backlog_priority, status, pub_date) 
+           WHERE backlog_priority IS NOT NULL""",
+
+        # Migration version identifier for the published experimental branch
+        "20260817_0010_intelligent_backlog_processing"
     ]
     
     for sql in migrations:

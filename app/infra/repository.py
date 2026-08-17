@@ -842,6 +842,15 @@ class EpisodeRepository:
             row = conn.execute("SELECT COUNT(*) as count FROM episodes WHERE status = 'processing'").fetchone()
             return row['count'] if row else 0
 
+    def count_completed(self, subscription_id: int) -> int:
+        """Count episodes with status='completed' for a subscription."""
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as count FROM episodes WHERE subscription_id = ? AND status = 'completed'",
+                (subscription_id,)
+            ).fetchone()
+            return row['count'] if row else 0
+
     def request_deletion(self, id: int) -> bool:
         """Mark an episode ignored and cancel queued work while retaining running-job ownership."""
         with get_db_connection() as conn:

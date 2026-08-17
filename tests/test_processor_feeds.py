@@ -37,6 +37,9 @@ def test_check_feeds_creates_new_episodes_from_feed(mock_feed_manager, mock_proc
 
     # True means the episode did not exist and was created
     mock_processor.ep_repo.create_or_ignore.return_value = True
+    
+    # Mock count_completed to return 0 for new subscription
+    mock_processor.ep_repo.count_completed.return_value = 0
 
     asyncio.run(mock_processor.check_feeds())
 
@@ -64,10 +67,13 @@ def test_check_feeds_skips_existing_episodes(mock_feed_manager, mock_processor):
 
     # False means the episode already exists in the database
     mock_processor.ep_repo.create_or_ignore.return_value = False
+    
+    # Mock count_completed to return 0 for new subscription
+    mock_processor.ep_repo.count_completed.return_value = 0
 
     asyncio.run(mock_processor.check_feeds())
 
-    # Should attempt to backfill/update status since it's within the limit
+    # Should attempt to backfill/update status since it's within the limit and backlog is needed
     mock_processor.ep_repo.update_status_by_guid.assert_called_once_with(
         1, 'guid-123', 'pending', condition_status='unprocessed'
     )
@@ -85,6 +91,9 @@ def test_check_feeds_respects_retention_limit(mock_feed_manager, mock_processor)
         {'title': 'Episode 1', 'guid': 'guid-1'},
         {'title': 'Episode 2', 'guid': 'guid-2'}
     ]
+    
+    # Mock count_completed to return 0 for new subscription
+    mock_processor.ep_repo.count_completed.return_value = 0
 
     asyncio.run(mock_processor.check_feeds())
 
@@ -138,6 +147,9 @@ def test_check_feeds_with_zero_limit_skips_initial_downloads(mock_feed_manager, 
     mock_feed_manager.parse_episodes.return_value = [
         {'title': 'Episode 1', 'guid': 'guid-1'}
     ]
+    
+    # Mock count_completed to return 0 for new subscription
+    mock_processor.ep_repo.count_completed.return_value = 0
 
     asyncio.run(mock_processor.check_feeds())
 
@@ -167,10 +179,18 @@ def test_check_feeds_uses_current_global_limit_for_inheriting_subscription(
         conn.commit()
 
     mock_processor.sub_repo = repository
+    
+    # Enable intelligent backlog for this test to match new behavior
+    from app.core.config import settings
+    settings.ENABLE_INTELLIGENT_BACKLOG = True
+    
     mock_feed_manager.parse_episodes.return_value = [
         {"title": f"Episode {index}", "guid": f"guid-{index}"}
         for index in range(1, 5)
     ]
+    
+    # Mock count_completed to return 0 for new subscription
+    mock_processor.ep_repo.count_completed.return_value = 0
 
     asyncio.run(mock_processor.check_feeds(subscription_id=subscription.id))
 
@@ -178,6 +198,8 @@ def test_check_feeds_uses_current_global_limit_for_inheriting_subscription(
         call.args[0]["status"]
         for call in mock_processor.ep_repo.create_or_ignore.call_args_list
     ]
+    # With intelligent backlog enabled and inherit_retention=True: effective limit is 3 (from global)
+    # Oldest 3 episodes within retention range are queued, oldest gets highest priority
     assert statuses == ["pending", "pending", "pending", "unprocessed"]
 
 

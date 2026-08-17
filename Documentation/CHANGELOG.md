@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added intelligent backlog processing: when fewer episodes than the retention limit are available, older unprocessed episodes within the retention range are automatically queued for download based on pub_date age and position in the feed. Opt-in via `ENABLE_INTELLIGENT_BACKLOG` setting (default: false).
+- Added database columns `backlog_priority` and `last_backlog_checked_at` to track automatic backlog episode selection and check timestamps.
+- Episodes are now prioritized for backlog filling based on how old they are relative to the newest episodes, ensuring continuous availability within the retention limit.
+
 ## 1.11.0 - 2026-07-28
 
 - Made the mobile dashboard more compact, reduced feed subscription choices to Direct link and a generic “Use your favourite app” workflow, and deemphasized the unified feed.

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     
     # Processing
     CHECK_INTERVAL_MINUTES: int = 60
+    BACKLOG_CHECK_INTERVAL_MINUTES: int | None = Field(None, description="Interval for checking backlog needs (None = same as CHECK_INTERVAL_MINUTES)")
     WHISPER_MODEL: str = "base"
     LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
     LOG_BACKUP_COUNT: int = 5
@@ -39,6 +40,9 @@ class Settings(BaseSettings):
     MIN_FREE_SPACE_BYTES: int = 1024 * 1024 * 1024  # 1 GB
     FFMPEG_TIMEOUT_SECONDS: int = 7200  # 2 hours per FFmpeg operation
     ALLOW_PRIVATE_FEEDS: bool = True
+    
+    # Intelligent backlog processing (opt-in)
+    ENABLE_INTELLIGENT_BACKLOG: bool = Field(False, description="Enable automatic backlog episode processing")
     
     @property
     def DB_PATH(self) -> str:
